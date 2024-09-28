@@ -1,0 +1,36 @@
+# File system
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Binaries for programs and plugins
+build/
+cmd/xuan/xuan
+cmd/xuand/xuand
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Generated files
+pkg/parser/yacc.go
+pkg/parser/yacc.output
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env

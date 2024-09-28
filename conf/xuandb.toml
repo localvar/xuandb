@@ -1,0 +1,111 @@
+# NOTE: Inline comment after a configuration item lists its possible values,
+#       and '*' marks the default value.
+
+# `logger` is the logger configurations.
+[logger]
+	# `level` is the minimal log level to emit.
+	level = "debug"		  # debug | *info | warn | error
+	# `format` is the format of the log records.
+	format = "text"       # *text | json
+	# `add-source` controls whether to add source code position to the log
+	# records.
+	add-source = false    # *false | true
+	# `output-to` controls where to write the log records.
+	output-to = "stderr"  # *stderr | stdout | discard | {path of a directory}
+
+# `node` is the node configuration, more than one `node` can be defined with
+# different `id` to provide configurations for different nodes.
+[[node]]
+	# `id` is the id of the node, each node should have a unique `id`.
+	#
+	# Here, "#default#" is a special `id` which means this is the the default
+	# node. the default node is not a real node, but provides a template for
+	# other nodes, if a configuration is missing in a node, the corresponding
+	# configuration here will be used. But configurations like 'http-addr' must
+	# be unique for each node, these configurations are ignored even if they
+	# are specified here.
+	#
+	# The default node is optional, if it is not specified, or if any
+	# configuraion is missing, the build-in default values are used.
+	id = "#default#"
+
+	# `http-addr` is the address for the HTTP service, it is used to provide
+	# the HTTP API for the node, the format is "host:port". This configuration
+	# should be specified in each node, the value specified in the default node
+	# will be ignored.
+	http-addr = ""
+
+	# `node.meta-service' is the configurations for the meta service.
+	[node.meta-service]
+		# `raft-addr` is the address for the raft service, the format is
+		# "host:port". This configuration should be specified in each node, the
+		# value specified in the default node will be ignored.
+		raft-addr = ""
+
+		# `raft-store` is the storage type for raft log store and stable store.
+		raft-store = "inmem"			# inmem | *boltdb
+
+		# `raft-snapshot-store` is the storage type for raft snapshot store.
+		raft-snapshot-store = "inmem"	# discard | inmem | *file
+
+		# `data-dir` is the directory to store meta data, like raft log and
+		# snapshot. If `raft-store` is "boltdb" or `raft-snapshot-store` is
+		# "file", then `data-dir` is required, otherwise it is optional. If
+		# some of the nodes run on a same machine, then these nodes should
+		# have their own unique `data-dir`, or there will be undefined runtime
+		# errors.
+		data-dir = ""
+
+	# `node.data-service' is the configurations for the data service.
+	[node.data-service]
+
+	# `node.query-service' is the configurations for the query service.
+	[node.query-service]
+
+# `node` with `id` other than "#default#" are configurations for the real nodes.
+[[node]]
+	id = "1"
+	http-addr = "127.0.0.1:7001"
+
+	# `node.meta-service' is the configurations for the meta service. This
+	# section is optional, the node will not start the meta service if it is
+	# omitted.
+	[node.meta-service]
+		raft-addr = "127.0.0.1:8001"
+		data-dir = "meta/1"
+
+	# `node.data-service' is the configurations for the data service. This
+	# section is optional, the node will not start the data service if it is
+	# omitted.
+	[node.data-service]
+
+	# `node.query-service' is the configurations for the data service. This
+	# section is optional, the node will not start the query service if it is
+	# omitted.
+	[node.query-service]
+
+
+[[node]]
+	id = "2"
+	http-addr = "127.0.0.1:7002"
+
+	[node.meta-service]
+		raft-addr = "127.0.0.1:8002"
+		data-dir = "meta/2"
+
+	[node.data-service]
+
+	[node.query-service]
+
+
+[[node]]
+	id = "3"
+	http-addr = "127.0.0.1:7003"
+
+	[node.meta-service]
+		raft-addr = "127.0.0.1:8003"
+		data-dir = "meta/3"
+
+	[node.data-service]
+
+	[node.query-service]
