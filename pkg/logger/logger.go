@@ -15,17 +15,19 @@ import (
 
 // Init initialize a logger according to the configuration and set it as the
 // slog.Default(). It also setup HTTP handlers to Get/Set the minimal log level.
-func Init(cfg *conf.LoggerConf) {
+func Init() {
+	lc := conf.CurrentNode().Logger
+
 	lvlVar := &slog.LevelVar{}
-	lvlVar.UnmarshalText([]byte(cfg.Level))
+	lvlVar.UnmarshalText([]byte(lc.Level))
 
 	opts := &slog.HandlerOptions{
-		AddSource: cfg.AddSource,
+		AddSource: lc.AddSource == "true",
 		Level:     lvlVar,
 	}
 
 	var w io.Writer
-	switch strings.ToLower(cfg.OutputTo) {
+	switch strings.ToLower(lc.OutputTo) {
 	case "stderr":
 		w = os.Stderr
 	case "stdout":
@@ -38,7 +40,7 @@ func Init(cfg *conf.LoggerConf) {
 	}
 
 	var handler slog.Handler
-	if cfg.Format == "json" {
+	if lc.Format == "json" {
 		handler = slog.NewJSONHandler(w, opts)
 	} else {
 		handler = slog.NewTextHandler(w, opts)

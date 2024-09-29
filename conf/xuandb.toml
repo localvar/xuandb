@@ -1,17 +1,10 @@
 # NOTE: Inline comment after a configuration item lists its possible values,
 #       and '*' marks the default value.
 
-# `logger` is the logger configurations.
-[logger]
-	# `level` is the minimal log level to emit.
-	level = "debug"		  # debug | *info | warn | error
-	# `format` is the format of the log records.
-	format = "text"       # *text | json
-	# `add-source` controls whether to add source code position to the log
-	# records.
-	add-source = false    # *false | true
-	# `output-to` controls where to write the log records.
-	output-to = "stderr"  # *stderr | stdout | discard | {path of a directory}
+# `cluster-name` is the name of the cluster, it is used to verify the node join
+# requests, only the nodes with the same cluster name can join the cluster. The
+# default value is the empty string.
+cluster-name = ""
 
 # `node` is the node configuration, more than one `node` can be defined with
 # different `id` to provide configurations for different nodes.
@@ -27,6 +20,20 @@
 	#
 	# The default node is optional, if it is not specified, or if any
 	# configuraion is missing, the build-in default values are used.
+	#
+	# **NOTE**:
+	#
+	# To distinguish an unspecified value from a zero value in Go, the type of
+	# all boolean and number values are string in the configuration. Otherwise,
+	# node configurations may be overwrited by the default incorrectly.
+	
+	# Take `enable-pprof` as an example, if its type is boolean and set to true
+	# in the default node, then all nodes will have `enable-pprof` set to true,
+	# even if some nodes set it to false explicitly.
+	#
+	# Technically, similar issues may happen to strings too, but it is less
+	# likely to happen, we can also require strings to have a non-zero/empty
+	# value to avoid it from design.
 	id = "#default#"
 
 	# `http-addr` is the address for the HTTP service, it is used to provide
@@ -34,6 +41,23 @@
 	# should be specified in each node, the value specified in the default node
 	# will be ignored.
 	http-addr = ""
+
+	# `enable-pprof` controls whether to enable the pprof service. The pprof
+	# service is used for debugging and performance tuning, it is not
+	# recommended to enable it in production environment.
+	enable-pprof = "false"    # *false | true
+
+	# `logger` is the logger configurations.
+	[logger]
+		# `level` is the minimal log level to emit.
+		level = "debug"		  # debug | *info | warn | error
+		# `format` is the format of the log records.
+		format = "text"       # text | *json
+		# `add-source` controls whether to add source code position to the log
+		# records.
+		add-source = "false"  # *false | true
+		# `output-to` controls where to write the log records.
+		output-to = "stderr"  # *stderr | stdout | discard | {path of a directory}
 
 	# `node.meta-service' is the configurations for the meta service.
 	[node.meta-service]

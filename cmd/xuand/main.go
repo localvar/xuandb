@@ -62,7 +62,7 @@ func main() {
 		return
 	}
 
-	logger.Init(&conf.Common().Logger)
+	logger.Init()
 
 	startHTTPServer()
 	defer func() {
