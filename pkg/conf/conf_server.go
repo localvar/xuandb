@@ -59,13 +59,10 @@ func LoadServer() error {
 		return fmt.Errorf("missing configuration for current node: %s", nodeID)
 	}
 
-	// add an http handler to expose configurations.
-	http.HandleFunc("/debug/config", handleListConf)
-
 	return nil
 }
 
-func handleListConf(w http.ResponseWriter, r *http.Request) {
+func HandleListConf(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.Header.Get("Accept"), "application/json") {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(&allConf)

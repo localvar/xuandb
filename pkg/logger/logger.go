@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/httpserver"
 )
 
 // Init initialize a logger according to the configuration and set it as the
@@ -56,7 +57,7 @@ func Init() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
-	http.HandleFunc("GET /debug/logger/level", handleGetLevel)
+	httpserver.HandleFunc("GET /debug/logger/level", handleGetLevel)
 
 	handleSetLevel := func(w http.ResponseWriter, r *http.Request) {
 		val := r.FormValue("value")
@@ -64,7 +65,7 @@ func Init() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 	}
-	http.HandleFunc("POST /debug/logger/level", handleSetLevel)
+	httpserver.HandleFunc("POST /debug/logger/level", handleSetLevel)
 }
 
 // lowLevelLog is the low-level logging function that wraps a slog logger, it

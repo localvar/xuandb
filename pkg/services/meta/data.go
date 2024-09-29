@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/hashicorp/raft"
+	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/services/metaapi"
 )
 
@@ -36,8 +37,8 @@ const (
 
 // registerDataAPIs registers the client request handlers.
 func registerDataAPIs() {
-	http.HandleFunc("POST /meta/user", handleAddUser)
-	http.HandleFunc("DELETE /meta/user", handleRemoveUser)
+	httpserver.HandleFunc("POST /meta/user", handleAddUser)
+	httpserver.HandleFunc("DELETE /meta/user", handleRemoveUser)
 }
 
 // dataApplyFuncs is the list of functions to apply data operations.

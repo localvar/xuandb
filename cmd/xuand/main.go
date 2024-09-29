@@ -1,47 +1,29 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
 	"github.com/localvar/xuandb/pkg/services/meta"
 	"github.com/localvar/xuandb/pkg/services/query"
 	"github.com/localvar/xuandb/pkg/version"
 )
 
-var shutdownHTTPServer func()
-
-func startHTTPServer() {
-	srv := &http.Server{Addr: conf.CurrentNode().HTTPAddr}
-
-	shutdownHTTPServer = func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		srv.Shutdown(ctx)
-		cancel()
-		slog.Info("http server stopped")
-	}
-
-	go func(srv *http.Server) {
-		err := srv.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			slog.Error(
-				"http server stopped unexpectly",
-				slog.String("error", err.Error()),
-			)
-			os.Exit(1)
-		}
-	}(srv)
-
-	slog.Info("http server started", slog.String("address", srv.Addr))
+// registerPprofHandlers registers the pprof handlers.
+func registerPprofHandlers() {
+	httpserver.HandleFunc("GET /debug/pprof/", pprof.Index)
+	httpserver.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	httpserver.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	httpserver.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	httpserver.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 }
 
 func main() {
@@ -64,9 +46,17 @@ func main() {
 
 	logger.Init()
 
-	startHTTPServer()
+	// add an http handler to expose configurations, we cannot do this in the
+	// conf package.
+	httpserver.HandleFunc("/debug/config", conf.HandleListConf)
+
+	if conf.CurrentNode().EnablePprof == "true" {
+		registerPprofHandlers()
+	}
+
+	httpserver.Start()
 	defer func() {
-		shutdownHTTPServer()
+		httpserver.Shutdown()
 		slog.Info("xuandb stopped.")
 	}()
 

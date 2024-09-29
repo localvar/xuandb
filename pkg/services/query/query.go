@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/parser"
 	"github.com/localvar/xuandb/pkg/services/metaapi"
 )
@@ -42,7 +43,7 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 
 // StartService starts the query service.
 func StartService() error {
-	http.Handle("/query", http.HandlerFunc(queryHandler))
+	httpserver.HandleFunc("/query", queryHandler)
 	return nil
 }
 

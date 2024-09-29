@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
 )
 
@@ -242,9 +243,9 @@ func createCluster() error {
 	// register meta service handlers if no error.
 	defer func() {
 		// node management APIs
-		http.HandleFunc("GET /meta/node", handleListNode)
-		http.HandleFunc("POST /meta/node", handleAddNode)
-		http.HandleFunc("DELETE /meta/node", handleRemoveNode)
+		httpserver.HandleFunc("GET /meta/node", handleListNode)
+		httpserver.HandleFunc("POST /meta/node", handleAddNode)
+		httpserver.HandleFunc("DELETE /meta/node", handleRemoveNode)
 		registerDataAPIs()
 	}()
 
