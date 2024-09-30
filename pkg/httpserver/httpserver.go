@@ -11,42 +11,45 @@ import (
 )
 
 var (
-	// Shutdown is a function to stop the http server.
-	Shutdown func()
-	serveMux http.ServeMux
+	mux = http.NewServeMux()
+	svr = &http.Server{}
 )
 
 // Start starts the http server.
 func Start() {
-	srv := &http.Server{Addr: conf.CurrentNode().HTTPAddr, Handler: &serveMux}
-
-	Shutdown = func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		srv.Shutdown(ctx)
-		cancel()
-		slog.Info("http server stopped")
-	}
-
 	go func() {
-		err := srv.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			slog.Error(
-				"http server stopped unexpectly",
-				slog.String("error", err.Error()),
-			)
-			os.Exit(1)
+		svr.Addr = conf.CurrentNode().HTTPAddr
+		svr.Handler = mux
+
+		err := svr.ListenAndServe()
+		if err == nil || err == http.ErrServerClosed {
+			return
 		}
+
+		slog.Error(
+			"http server stopped unexpectly",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
 	}()
 
-	slog.Info("http server started", slog.String("address", srv.Addr))
+	slog.Info("http server started", slog.String("address", svr.Addr))
 }
 
-// Handle registers the handler for the given pattern in [serveMux].
+// Shutdown stops the http server.
+func Shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	svr.Shutdown(ctx)
+	cancel()
+	slog.Info("http server stopped")
+}
+
+// Handle registers the handler for the given pattern in [mux].
 func Handle(pattern string, handler http.Handler) {
-	serveMux.Handle(pattern, handler)
+	mux.Handle(pattern, handler)
 }
 
-// HandleFunc registers the handler function for the given pattern in [serveMux].
+// HandleFunc registers the handler function for the given pattern in [mux].
 func HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	serveMux.HandleFunc(pattern, handler)
+	mux.HandleFunc(pattern, handler)
 }
