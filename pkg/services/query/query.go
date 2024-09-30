@@ -7,12 +7,12 @@ import (
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/parser"
 	"github.com/localvar/xuandb/pkg/services/metaapi"
+	"github.com/localvar/xuandb/pkg/utils"
 )
 
 func handleCreateUser(stmt *parser.CreateUserStatement) error {
 	u := metaapi.User{Name: stmt.Name, Password: stmt.Password}
-	metaapi.AddUser(u)
-	return nil
+	return metaapi.AddUser(u)
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
@@ -35,9 +35,14 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		err = handleCreateUser(s)
 	}
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err == nil {
 		return
+	}
+
+	if se, ok := err.(*utils.StatusError); ok {
+		http.Error(w, se.Msg, se.Code)
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 

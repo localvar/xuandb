@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/raft"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/services/metaapi"
+	"github.com/localvar/xuandb/pkg/utils"
 )
 
 // Data is the meta data that managed by the meta service.
@@ -48,18 +49,6 @@ var dataApplyFuncs = [opLast]func(*Data, *raft.Log) any{
 	opSetPassword: applySetPassword,
 }
 
-// fsmApplyError represents an error that occurred in the Apply method of the
-// Raft FSM.
-type fsmApplyError struct {
-	statusCode int
-	msg        string
-}
-
-// Error implements method Error of the error interface.
-func (ae *fsmApplyError) Error() string {
-	return ae.msg
-}
-
 // baseCommand is the base of all data operation commands.
 type baseCommand struct {
 	Op uint32 `json:"op"`
@@ -79,8 +68,8 @@ func raftApply(w http.ResponseWriter, data []byte) {
 	}
 
 	if resp := future.Response(); resp != nil {
-		if ae, ok := resp.(fsmApplyError); ok {
-			http.Error(w, ae.msg, ae.statusCode)
+		if se, ok := resp.(*utils.StatusError); ok {
+			http.Error(w, se.Msg, se.Code)
 		} else if err, ok := resp.(error); ok {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		} else {
@@ -151,9 +140,9 @@ func applyAddUser(d *Data, l *raft.Log) any {
 		return nil
 	}
 
-	return fsmApplyError{
-		statusCode: http.StatusConflict,
-		msg:        fmt.Sprintf("user already exists: %s", cmd.Name),
+	return &utils.StatusError{
+		Code: http.StatusConflict,
+		Msg:  fmt.Sprintf("user already exists: %s", cmd.Name),
 	}
 }
 

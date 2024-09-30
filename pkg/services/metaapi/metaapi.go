@@ -3,12 +3,12 @@ package metaapi
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"sync/atomic"
 
 	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/utils"
 )
 
 // LeaderHintHeader is the header name, the meta service set this header with
@@ -16,7 +16,10 @@ import (
 const LeaderHintHeader = "X-Meta-Leader-Hint"
 
 // ErrNoMetaService means there's no available meta serice in the cluster.
-var ErrNoMetaService = errors.New("no meta service available")
+var ErrNoMetaService = &utils.StatusError{
+	Code: http.StatusServiceUnavailable,
+	Msg:  "no meta service available",
+}
 
 // buildRequestFunc is a function type, the functions build a request which will
 // be sent to server address 'addr'.
@@ -83,7 +86,7 @@ func sendRequestToLeader(buildRequest buildRequestFunc) (resp *http.Response, er
 		if body, e1 := io.ReadAll(resp.Body); e1 != nil {
 			err = e1
 		} else {
-			err = errors.New(string(body))
+			err = &utils.StatusError{Code: resp.StatusCode, Msg: string(body)}
 		}
 		resp.Body.Close()
 
@@ -116,6 +119,12 @@ func AddUser(u User) error {
 		url := "http://" + addr + "/meta/user"
 		return http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
 	}
-	sendRequestToLeader(fn)
+
+	resp, err := sendRequestToLeader(fn)
+	if err != nil {
+		return err
+	}
+
+	resp.Body.Close()
 	return nil
 }
