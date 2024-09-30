@@ -6,21 +6,31 @@ GOPATH := $(shell go env GOPATH)
 
 VERSION ?= v0.0.1
 
+
+# build flags: disable inlining and optimizations in debug build and enable
+# trimpath in release build
+BUILDFLAGS :=
+
+ifdef DEBUG
+	BUILDFLAGS += -gcflags=all="-N -l"
+else
+	BUILDFLAGS += -trimpath
+endif
+
+BUILDFLAGS += -ldflags "-X github.com/localvar/xuandb/pkg/version.version=${VERSION}"
+
+
 build: server client
 
 client:
 	@echo "Building client..."
 	cd ${PROJECT_DIR} && \
-	go build -v -trimpath \
-		-ldflags "-X github.com/localvar/xuandb/pkg/version.version=${VERSION}" \
-		-o build/bin/xuan ./cmd/xuan
+	go build ${BUILDFLAGS} -o build/bin/xuan ./cmd/xuan
 
 server: generate
 	@echo "Building server..."
 	cd ${PROJECT_DIR} && \
-	go build -v -trimpath -tags="xuandb_server"\
-		-ldflags "-X github.com/localvar/xuandb/pkg/version.version=${VERSION}" \
-		-o build/bin/xuand ./cmd/xuand
+	go build -tags="xuandb_server" ${BUILDFLAGS} -o build/bin/xuand ./cmd/xuand
 
 generate:
 ifeq ($(wildcard ${GOPATH}/bin/goyacc),)

@@ -47,8 +47,8 @@ cluster-name = ""
 	# recommended to enable it in production environment.
 	enable-pprof = "false"    # *false | true
 
-	# `logger` is the logger configurations.
-	[logger]
+	# `node.logger` is the logger configurations.
+	[node.logger]
 		# `level` is the minimal log level to emit.
 		level = "debug"		  # debug | *info | warn | error
 		# `format` is the format of the log records.

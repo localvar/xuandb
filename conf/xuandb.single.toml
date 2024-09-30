@@ -1,0 +1,24 @@
+# please refer xuandb.cluster.toml for documentation
+
+cluster-name = ""
+
+[[node]]
+	id = "1"
+	http-addr = "127.0.0.1:7001"
+	enable-pprof = "false"
+
+	[node.logger]
+		level = "debug"
+		format = "text"
+		add-source = "false"
+		output-to = "stderr"
+
+	[node.meta-service]
+		raft-addr = "127.0.0.1:8001"
+		raft-store = "inmem"
+		raft-snapshot-store = "inmem"
+		data-dir = "meta/single"
+
+	[node.data-service]
+
+	[node.query-service]
