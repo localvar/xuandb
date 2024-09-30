@@ -4,6 +4,7 @@ package parser
 
 %union {
 	stmt    Statement
+    expr    Expr
     str     string
     int     uint64
     float   float64
@@ -54,12 +55,14 @@ package parser
 %%
 
 STATEMENT:
-	CREATE_USER_STATEMENT
+    CREATE_USER_STATEMENT
 	{
+        yylex.(*Lexer).Result = $1
 		$$ = $1
 	}
     | CREATE_DATABASE_STATEMENT
     {
+        yylex.(*Lexer).Result = $1
         $$ = $1
     }
 

@@ -14,7 +14,8 @@ import (
 // Lexer implements a lexer for the parser.
 type Lexer struct {
 	Scanner
-	LogError func(msg string)
+	Result      Statement
+	ReportError func(msg string)
 }
 
 // NewLexer creates and returns a new lexer with source 'src'.
@@ -222,7 +223,7 @@ func (l *Lexer) Lex(lval *yySymType) int {
 
 // Error implements method Error of interface yyLexer.
 func (l *Lexer) Error(msg string) {
-	if l.LogError == nil {
+	if l.ReportError == nil {
 		return
 	}
 
@@ -232,7 +233,7 @@ func (l *Lexer) Error(msg string) {
 		pos = s.Pos()
 	}
 
-	l.LogError(fmt.Sprintf("%s: %s: %s", pos, s.TokenText(), msg))
+	l.ReportError(fmt.Sprintf("%s: %s: %s", pos, s.TokenText(), msg))
 }
 
 // decodeDigits decodes the first 'n' digits of 'str' to a rune, it returns

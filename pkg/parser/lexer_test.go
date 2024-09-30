@@ -166,7 +166,7 @@ TRUE FALSE CREATE IDENT
 	checkToken(t, l, 0)
 
 	l = NewLexer(strings.NewReader("9dw"))
-	l.LogError = func(msg string) {
+	l.ReportError = func(msg string) {
 		const want = "<input>:1:1: : abc"
 		if msg != want {
 			t.Errorf("error msg = %q, want = %q", msg, want)
@@ -174,7 +174,7 @@ TRUE FALSE CREATE IDENT
 	}
 	l.Error("abc")
 
-	l.LogError = func(msg string) {
+	l.ReportError = func(msg string) {
 		const want = "<input>:1:1: 9dw: extra character after duration"
 		if msg != want {
 			t.Errorf("error msg = %q, want = %q", msg, want)

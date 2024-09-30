@@ -1,16 +1,25 @@
 package parser
 
-type Parser struct {
-	s *Scanner
-	y yyParser
-}
-
-func New() *Parser {
-	return &Parser{}
-}
+import (
+	"errors"
+	"log/slog"
+	"strings"
+)
 
 func Parse(input string) (Statement, error) {
-	//p := New()
-	return nil, nil
-	//return p.Parse(input)
+	slog.Debug("parse query", slog.String("input", input))
+
+	errs := make([]string, 0)
+	l := NewLexer(strings.NewReader(input))
+	l.ReportError = func(msg string) {
+		errs = append(errs, msg)
+	}
+
+	if yyParse(l) == 0 {
+		return l.Result, nil
+	}
+
+	msg := strings.Join(errs, "\n")
+	slog.Debug("parse error", slog.String("error", msg))
+	return nil, errors.New(msg)
 }
