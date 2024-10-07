@@ -2,11 +2,13 @@ package conf
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
 // MetaServiceConf contains configuration for the meta service.
 type MetaServiceConf struct {
+	RaftVoter         string `toml:"raft-voter" json:"raftVoter"`
 	RaftAddr          string `toml:"raft-addr" json:"raftAddr"`
 	RaftStore         string `toml:"raft-store" json:"raftStore"`
 	RaftSnapshotStore string `toml:"raft-snapshot-store" json:"raftSnapshotStore"`
@@ -35,7 +37,17 @@ func (msc *MetaServiceConf) fillDefaults(dflt *MetaServiceConf) {
 // normalizeAndValidate normalizes & validates the MetaServiceConf.
 func (msc *MetaServiceConf) normalizeAndValidate() error {
 	if msc == nil {
-		return nil
+		return fmt.Errorf("'meta-service' section is required")
+	}
+
+	if v, err := strconv.ParseBool(msc.RaftVoter); err == nil {
+		msc.RaftVoter = strconv.FormatBool(v)
+	} else {
+		return fmt.Errorf("invalid 'raft-voter': %s", msc.RaftVoter)
+	}
+
+	if msc.RaftAddr == "" {
+		return fmt.Errorf("'raft-addr' is required")
 	}
 
 	switch strings.ToLower(msc.RaftStore) {
@@ -58,10 +70,19 @@ func (msc *MetaServiceConf) normalizeAndValidate() error {
 		return fmt.Errorf("invalid 'raft-snapshot-store': %s", msc.RaftSnapshotStore)
 	}
 
-	if msc.RaftStore == "boltdb" || msc.RaftSnapshotStore == "file" {
-		if msc.DataDir == "" {
-			return fmt.Errorf("'data-dir' is required when 'raft-store' is 'boltdb' or 'raft-snapshot-store' is 'file'")
-		}
+	if msc.RaftVoter != "true" {
+		msc.RaftStore = "memory"
+		msc.RaftSnapshotStore = "discard"
+		msc.DataDir = ""
+		return nil
+	}
+
+	if msc.RaftStore != "boltdb" && msc.RaftSnapshotStore != "file" {
+		return nil
+	}
+
+	if msc.DataDir == "" {
+		return fmt.Errorf("'data-dir' is required")
 	}
 
 	return nil

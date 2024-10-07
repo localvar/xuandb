@@ -22,11 +22,13 @@ var service struct {
 	data *Data
 }
 
-// joinCluster joins the raft cluster via addr.
+// joinCluster joins the current node to the raft cluster specified by addr.
 func joinCluster(addr string) error {
+	msc := conf.CurrentNode().MetaService
 	query := url.Values{
-		"id":   {conf.NodeID()},
-		"addr": {conf.CurrentNode().MetaService.RaftAddr},
+		"id":    {conf.NodeID()},
+		"addr":  {msc.RaftAddr},
+		"voter": {msc.RaftVoter},
 	}.Encode()
 
 	urlJoin := "http://" + addr + "/meta/node?" + query
@@ -75,18 +77,24 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	ra := service.raft
 	if ra.State() != raft.Leader {
 		slog.Info("cannot add node due to not leader", slog.String("nodeId", id))
-		http.Error(w, "not leader", http.StatusInternalServerError)
+		http.Error(w, "not leader", http.StatusServiceUnavailable)
 		return
 	}
 
-	err := ra.AddVoter(raft.ServerID(id), raft.ServerAddress(addr), 0, 0).Error()
+	var err error
+	if r.FormValue("voter") == "true" {
+		err = ra.AddVoter(raft.ServerID(id), raft.ServerAddress(addr), 0, 0).Error()
+	} else {
+		err = ra.AddNonvoter(raft.ServerID(id), raft.ServerAddress(addr), 0, 0).Error()
+	}
+
 	if err == nil {
-		slog.Info("voter added", slog.String("nodeId", id))
+		slog.Info("node added", slog.String("nodeId", id))
 		return
 	}
 
 	slog.Error(
-		"failed to add voter",
+		"failed to add node",
 		slog.String("nodeId", id),
 		slog.String("error", err.Error()),
 	)
@@ -134,7 +142,7 @@ func handleRemoveNode(w http.ResponseWriter, r *http.Request) {
 	ra := service.raft
 	if ra.State() != raft.Leader {
 		slog.Info("cannot remove node due to not leader", slog.String("nodeId", id))
-		http.Error(w, "not leader", http.StatusInternalServerError)
+		http.Error(w, "not leader", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -193,14 +201,9 @@ func createRaftStore(msc *conf.MetaServiceConf) (raft.LogStore, raft.StableStore
 	}
 }
 
-// createCluster creates the meta service cluster.
-func createCluster() error {
+// StartService starts the meta data service.
+func StartService() error {
 	msc := conf.CurrentNode().MetaService
-
-	// meta service is not configured on this node.
-	if msc == nil {
-		return nil
-	}
 
 	// create raft and its dependencies objects.
 	logger := logger.HashiCorp(nil)
@@ -240,14 +243,16 @@ func createCluster() error {
 	}
 	service.raft = ra
 
-	// register meta service handlers if no error.
-	defer func() {
-		// node management APIs
-		httpserver.HandleFunc("GET /meta/node", handleListNode)
-		httpserver.HandleFunc("POST /meta/node", handleAddNode)
-		httpserver.HandleFunc("DELETE /meta/node", handleRemoveNode)
-		registerDataAPIs()
-	}()
+	// only voter nodes expose APIs
+	if msc.RaftVoter == "true" {
+		defer func() {
+			// node management APIs
+			httpserver.HandleFunc("GET /meta/node", handleListNode)
+			httpserver.HandleFunc("POST /meta/node", handleAddNode)
+			httpserver.HandleFunc("DELETE /meta/node", handleRemoveNode)
+			registerDataAPIs()
+		}()
+	}
 
 	// already has existing state, no need to join or bootstrap.
 	if hasState {
@@ -257,21 +262,34 @@ func createCluster() error {
 	// try join first, but collect nodes info for bootstrap at the same time.
 	svrs := make([]raft.Server, 0, len(conf.Nodes()))
 	for _, nc := range conf.Nodes() {
-		if nc.MetaService == nil {
+		svr := raft.Server{
+			ID:      raft.ServerID(nc.ID),
+			Address: raft.ServerAddress(nc.MetaService.RaftAddr),
+		}
+
+		if nc.MetaService.RaftVoter != "true" {
+			svr.Suffrage = raft.Nonvoter
+		}
+
+		svrs = append(svrs, svr)
+
+		if svr.Suffrage == raft.Nonvoter || nc.ID == conf.NodeID() {
 			continue
 		}
 
-		svrs = append(svrs, raft.Server{
-			ID:      raft.ServerID(nc.ID),
-			Address: raft.ServerAddress(nc.MetaService.RaftAddr),
-		})
-
-		if nc.ID != conf.NodeID() && joinCluster(nc.HTTPAddr) == nil {
+		if joinCluster(nc.HTTPAddr) == nil {
 			return nil
 		}
 	}
 
-	// then try bootstrap, note it is ok for 2 or more nodes to bootstrap,
+	// non-voter never bootstraps a cluster, so return and wait the leader to
+	// add this node.
+	if msc.RaftVoter != "true" {
+		slog.Info("cannot join an existing cluster")
+		return nil
+	}
+
+	// try bootstrap, note it is ok for 2 or more nodes to bootstrap,
 	// and if bootstrap fails, just wait for the leader to add this node.
 	slog.Info("cannot join an existing cluster, trying to bootstrap")
 	err = ra.BootstrapCluster(raft.Configuration{Servers: svrs}).Error()
@@ -284,17 +302,8 @@ func createCluster() error {
 	return nil
 }
 
-// StartService starts the meta data service.
-func StartService() error {
-	return createCluster()
-}
-
 // ShutdownService shuts down the meta data service.
 func ShutdownService() {
-	if conf.CurrentNode().MetaService == nil {
-		return
-	}
-
 	if service.raft == nil {
 		return
 	}

@@ -14,9 +14,10 @@ cluster-name = ""
 		output-to = "stderr"
 
 	[node.meta-service]
+		raft-voter = "true"
 		raft-addr = "127.0.0.1:8001"
-		raft-store = "inmem"
-		raft-snapshot-store = "inmem"
+		raft-store = "memory"
+		raft-snapshot-store = "memory"
 		data-dir = "meta/single"
 
 	[node.data-service]

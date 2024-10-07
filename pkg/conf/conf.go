@@ -81,7 +81,7 @@ func (lc *LoggerConf) normalizeAndValidate() error {
 	if v, err := strconv.ParseBool(lc.AddSource); err == nil {
 		lc.AddSource = strconv.FormatBool(v)
 	} else {
-		return fmt.Errorf("invalid 'add-source' value: %s", lc.AddSource)
+		return fmt.Errorf("invalid 'add-source': %s", lc.AddSource)
 	}
 
 	return nil
@@ -279,6 +279,7 @@ func normalizeAndValidate() error {
 		return err
 	}
 
+	numVoter := 0
 	ids := make(map[string]struct{})
 	for _, nc := range allConf.Nodes {
 		if nc.ID == "" {
@@ -296,7 +297,7 @@ func normalizeAndValidate() error {
 		if v, err := strconv.ParseBool(nc.EnablePprof); err == nil {
 			nc.EnablePprof = strconv.FormatBool(v)
 		} else {
-			return fmt.Errorf("invalid 'enable-pprof' value: %s", nc.EnablePprof)
+			return fmt.Errorf("invalid 'enable-pprof': %s", nc.EnablePprof)
 		}
 
 		if err := nc.Logger.normalizeAndValidate(); err != nil {
@@ -306,12 +307,23 @@ func normalizeAndValidate() error {
 		if err := nc.MetaService.normalizeAndValidate(); err != nil {
 			return err
 		}
+		if nc.MetaService.RaftVoter == "true" {
+			numVoter++
+		}
+
 		if err := nc.DataService.normalizeAndValidate(); err != nil {
 			return err
 		}
 		if err := nc.QueryService.normalizeAndValidate(); err != nil {
 			return err
 		}
+	}
+
+	if numVoter == 0 {
+		return fmt.Errorf("no node is a raft voter")
+	}
+	if numVoter%2 == 0 {
+		return fmt.Errorf("the count of raft voters should be an odd number")
 	}
 
 	return nil

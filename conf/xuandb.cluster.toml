@@ -38,7 +38,7 @@ cluster-name = ""
 
 	# `http-addr` is the address for the HTTP service, it is used to provide
 	# the HTTP API for the node, the format is "host:port". This configuration
-	# should be specified in each node, the value specified in the default node
+	# must be specified in each node, the value specified in the default node
 	# will be ignored.
 	http-addr = ""
 
@@ -61,23 +61,34 @@ cluster-name = ""
 
 	# `node.meta-service' is the configurations for the meta service.
 	[node.meta-service]
-		# `raft-addr` is the address for the raft service, the format is
-		# "host:port". This configuration should be specified in each node, the
-		# value specified in the default node will be ignored.
+		# `raft-voter` specifies whether this node is a voter in the raft
+		# cluster or not. Both voter and non-voter nodes provide a local cache
+		# of the meta data, but voter nodes also participate in raft elections
+		# and log entry commitment, while non-voter nodes does not. This
+		# configuration must be specified in each node, the value specified in
+		# the default node will be ignored.
+		raft-voter = ""       # false | true
+
+		# `raft-addr` is the address for the raft internal communication, the
+		# format is "host:port". This configuration must be specified in each
+		# node, the value specified in the default node will be ignored.
+		# must be specified in all nodes.
 		raft-addr = ""
 
 		# `raft-store` is the storage type for raft log store and stable store.
-		raft-store = "inmem"			# inmem | *boltdb
+		# Voter nodes should use "boltdb" in production environment. Non-voter
+		# nodes ignores this configuration and always uses "memory".
+		raft-store = "memory"			# memory | *boltdb
 
 		# `raft-snapshot-store` is the storage type for raft snapshot store.
-		raft-snapshot-store = "inmem"	# discard | inmem | *file
+		# Voter nodes should use "file" in production environment. Non-voter
+		# nodes ignores this configuration and always uses "discard".
+		raft-snapshot-store = "memory"	# discard | memory | *file
 
 		# `data-dir` is the directory to store meta data, like raft log and
-		# snapshot. If `raft-store` is "boltdb" or `raft-snapshot-store` is
-		# "file", then `data-dir` is required, otherwise it is optional. If
-		# some of the nodes run on a same machine, then these nodes should
-		# have their own unique `data-dir`, or there will be undefined runtime
-		# errors.
+		# snapshot. If some of the nodes run on a same host, then these nodes
+		# should have their own unique `data-dir`, or there will be undefined
+		# runtime errors.
 		data-dir = ""
 
 	# `node.data-service' is the configurations for the data service.
@@ -92,9 +103,9 @@ cluster-name = ""
 	http-addr = "127.0.0.1:7001"
 
 	# `node.meta-service' is the configurations for the meta service. This
-	# section is optional, the node will not start the meta service if it is
-	# omitted.
+	# section is required on all nodes.
 	[node.meta-service]
+		raft-voter = "true"
 		raft-addr = "127.0.0.1:8001"
 		data-dir = "meta/1"
 
@@ -114,6 +125,7 @@ cluster-name = ""
 	http-addr = "127.0.0.1:7002"
 
 	[node.meta-service]
+		raft-voter = "true"
 		raft-addr = "127.0.0.1:8002"
 		data-dir = "meta/2"
 
@@ -127,6 +139,7 @@ cluster-name = ""
 	http-addr = "127.0.0.1:7003"
 
 	[node.meta-service]
+		raft-voter = "true"
 		raft-addr = "127.0.0.1:8003"
 		data-dir = "meta/3"
 
