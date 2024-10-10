@@ -21,7 +21,7 @@ func main() {
 		return
 	}
 
-	if err := conf.LoadClient(); err != nil {
+	if err := conf.Load(""); err != nil {
 		fmt.Println("Failed to load configuration:", err)
 		return
 	}

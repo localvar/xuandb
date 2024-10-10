@@ -20,10 +20,10 @@ func Init() {
 	lc := conf.CurrentNode().Logger
 
 	lvlVar := &slog.LevelVar{}
-	lvlVar.UnmarshalText([]byte(lc.Level))
+	lvlVar.Set(lc.Level)
 
 	opts := &slog.HandlerOptions{
-		AddSource: lc.AddSource == "true",
+		AddSource: lc.AddSource,
 		Level:     lvlVar,
 	}
 

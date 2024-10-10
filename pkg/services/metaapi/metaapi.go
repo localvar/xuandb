@@ -42,11 +42,11 @@ func sendRequestToLeader(buildRequest buildRequestFunc) (resp *http.Response, er
 	tried := map[string]struct{}{}
 	for idx < len(nodes) {
 		// if we don't have a valid leader address, get the address of the next
-		// node which includes meta service.
+		// node which is a raft voter.
 		if addr == "" {
 			n := nodes[idx]
 			idx++
-			if n.MetaService == nil {
+			if !n.Meta.RaftVoter {
 				continue
 			}
 			addr = n.HTTPAddr

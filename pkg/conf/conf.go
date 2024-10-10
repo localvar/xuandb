@@ -2,68 +2,60 @@ package conf
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strconv"
+	"log/slog"
 	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
-// CommonConf contains common/shared configurations.
+// hasKeyFunc checks if a key is defined in the configuration file.
+type hasKeyFunc func(string) bool
+
+// CommonConf contains common/shared configurations for all nodes.
 type CommonConf struct {
 	ClusterName string `toml:"cluster-name" json:"clusterName"`
 }
 
-// fillDefaults fills the default values for configurations.
-func (cc *CommonConf) fillDefaults() {
-}
-
-// normalizeAndValidate normalizes & validates the configurations.
-func (cc *CommonConf) normalizeAndValidate() error {
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (cc *CommonConf) tidy() error {
 	return nil
 }
 
 // LoggerConf contains logger configuration.
 type LoggerConf struct {
-	Format string `toml:"format" json:"format"`
-	Level  string `toml:"level" json:"level"`
-	// To distinguish a zero value from unspecified value, the type of the
-	// 'add-source' field is string. And this applies to other boolean and
-	// number fields.
-	AddSource string `toml:"add-source" json:"addSource"`
-	OutputTo  string `toml:"output-to" json:"outputTo"`
+	Format    string     `toml:"format" json:"format"`
+	Level     slog.Level `toml:"level" json:"level"`
+	AddSource bool       `toml:"add-source" json:"addSource"`
+	OutputTo  string     `toml:"output-to" json:"outputTo"`
 }
 
 // defaultLoggerConf contains the default values for LoggerConf.
 var defaultLoggerConf = &LoggerConf{
 	Format:    "json",
-	Level:     "info",
-	AddSource: "true",
+	Level:     slog.LevelInfo,
+	AddSource: true,
 	OutputTo:  "stderr",
 }
 
-// fillDefaults fills the default values for configurations.
-func (lc *LoggerConf) fillDefaults(dflt *LoggerConf) {
-	if lc.Level == "" {
-		lc.Level = dflt.Level
-	}
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (lc *LoggerConf) tidy(dflt *LoggerConf, hasKey hasKeyFunc) error {
 	if lc.Format == "" {
 		lc.Format = dflt.Format
 	}
-	if lc.AddSource == "" {
+
+	if !hasKey("level") {
+		lc.Level = dflt.Level
+	}
+
+	if !hasKey("add-source") {
 		lc.AddSource = dflt.AddSource
 	}
+
 	if lc.OutputTo == "" {
 		lc.OutputTo = dflt.OutputTo
 	}
-}
 
-// normalizeAndValidate normalizes & validates the configurations.
-func (lc *LoggerConf) normalizeAndValidate() error {
 	switch v := strings.ToLower(lc.Format); v {
 	case "json", "text":
 		lc.Format = v
@@ -71,284 +63,194 @@ func (lc *LoggerConf) normalizeAndValidate() error {
 		return fmt.Errorf("unknown log format: %s", lc.Format)
 	}
 
-	switch v := strings.ToLower(lc.Level); v {
-	case "debug", "info", "warn", "error":
-		lc.Level = v
+	return nil
+}
+
+// MetaConf contains configuration for the meta service.
+type MetaConf struct {
+	RaftVoter         bool   `toml:"raft-voter" json:"raftVoter"`
+	RaftAddr          string `toml:"raft-addr" json:"raftAddr"`
+	RaftStore         string `toml:"raft-store" json:"raftStore"`
+	RaftSnapshotStore string `toml:"raft-snapshot-store" json:"raftSnapshotStore"`
+	DataDir           string `toml:"data-dir" json:"dataDir"`
+}
+
+// defaultMetaConf contains the default values for MetaConf.
+var defaultMetaConf = &MetaConf{
+	RaftStore:         "boltdb",
+	RaftSnapshotStore: "file",
+}
+
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (mc *MetaConf) tidy(dflt *MetaConf, hasKey hasKeyFunc, dfltNode bool) error {
+	if !hasKey("raft-addr") {
+		mc.RaftVoter = dflt.RaftVoter
+	}
+
+	// the raft address of the default node should be empty, while should not
+	// be empty if not default node.
+	if dfltNode {
+		mc.RaftAddr = ""
+	} else if mc.RaftAddr == "" {
+		return fmt.Errorf("'raft-addr' is required")
+	} else if !mc.RaftVoter {
+		mc.RaftStore = "memory"
+		mc.RaftSnapshotStore = "discard"
+		mc.DataDir = ""
+		return nil
+	}
+
+	switch strings.ToLower(mc.RaftStore) {
+	case "inmem", "memory":
+		mc.RaftStore = "memory"
+	case "boltdb":
+		mc.RaftStore = "boltdb"
+	case "":
+		mc.RaftStore = dflt.RaftStore
 	default:
-		return fmt.Errorf("unknown log level: %s", lc.Level)
+		return fmt.Errorf("invalid 'raft-store': %s", mc.RaftStore)
 	}
 
-	if v, err := strconv.ParseBool(lc.AddSource); err == nil {
-		lc.AddSource = strconv.FormatBool(v)
-	} else {
-		return fmt.Errorf("invalid 'add-source': %s", lc.AddSource)
+	switch strings.ToLower(mc.RaftSnapshotStore) {
+	case "discard", "none", "null":
+		mc.RaftSnapshotStore = "discard"
+	case "inmem", "memory":
+		mc.RaftSnapshotStore = "memory"
+	case "file":
+		mc.RaftSnapshotStore = "file"
+	case "":
+		mc.RaftSnapshotStore = dflt.RaftSnapshotStore
+	default:
+		return fmt.Errorf("invalid 'raft-snapshot-store': %s", mc.RaftSnapshotStore)
 	}
 
+	if mc.DataDir == "" {
+		mc.DataDir = dflt.DataDir
+	}
+
+	// if default node, no need to check the relationship between 'raft-store',
+	// 'raft-snapshot-store' and 'data-dir'
+	if dfltNode {
+		return nil
+	}
+
+	if mc.RaftStore != "boltdb" && mc.RaftSnapshotStore != "file" {
+		return nil
+	}
+
+	if mc.DataDir == "" {
+		return fmt.Errorf("'data-dir' is required")
+	}
+
+	return nil
+}
+
+// StoreConf contains configuration for the store service.
+type StoreConf struct {
+	DataDir string `toml:"data-dir" json:"dataDir"`
+}
+
+// defaultStoreConf contains the default values for StoreConf.
+var defaultStoreConf = &StoreConf{}
+
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (sc *StoreConf) tidy(dflt *StoreConf, hasKey hasKeyFunc) error {
+	if sc.DataDir == "" {
+		sc.DataDir = dflt.DataDir
+	}
+	return nil
+}
+
+// QueryConf contains configuration for the query service.
+type QueryConf struct {
+}
+
+// defaultQueryConf contains the default values for QueryConf.
+var defaultQueryConf = &QueryConf{}
+
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (qc *QueryConf) tidy(dflt *QueryConf, hasKey hasKeyFunc) error {
 	return nil
 }
 
 // NodeConf contains configuration for a node.
 type NodeConf struct {
-	ID           string            `toml:"id" json:"id"`
-	HTTPAddr     string            `toml:"http-addr" json:"httpAddr"`
-	EnablePprof  string            `toml:"enable-pprof" json:"enablePprof"`
-	Logger       *LoggerConf       `toml:"logger,omitempty" json:"logger,omitempty"`
-	MetaService  *MetaServiceConf  `toml:"meta-service,omitempty" json:"metaService,omitempty"`
-	DataService  *DataServiceConf  `toml:"data-service,omitempty" json:"dataService,omitempty"`
-	QueryService *QueryServiceConf `toml:"query-service,omitempty" json:"queryService,omitempty"`
+	ID          string      `toml:"id" json:"id"`
+	HTTPAddr    string      `toml:"http-addr" json:"httpAddr"`
+	EnablePprof bool        `toml:"enable-pprof" json:"enablePprof"`
+	Logger      *LoggerConf `toml:"logger,omitempty" json:"logger,omitempty"`
+	Meta        *MetaConf   `toml:"meta,omitempty" json:"meta,omitempty"`
+	Store       *StoreConf  `toml:"store,omitempty" json:"store,omitempty"`
+	Query       *QueryConf  `toml:"query,omitempty" json:"query,omitempty"`
 }
 
 // defaultNodeConf contains the default values for NodeConf.
 var defaultNodeConf = &NodeConf{
-	EnablePprof:  "false",
-	Logger:       defaultLoggerConf,
-	MetaService:  defaultMetaServiceConf,
-	DataService:  defaultDataServiceConf,
-	QueryService: defaultQueryServiceConf,
+	Logger: defaultLoggerConf,
+	Meta:   defaultMetaConf,
+	Store:  defaultStoreConf,
+	Query:  defaultQueryConf,
 }
 
-// allConf contains all of the configuration.
-var allConf struct {
-	CommonConf
-	Nodes []*NodeConf `toml:"node" json:"nodes"`
-}
+// tidy fills missing configuration items with default values, normalizes all
+// values and validates the configuration.
+func (nc *NodeConf) tidy(dflt *NodeConf, hasKey hasKeyFunc, dfltNode bool) error {
+	if nc.ID == "" {
+		return errors.New("'id' is required for each node")
+	}
 
-// common command line arguments for both client and server.
-var (
-	confPath    string
-	showVersion bool
-)
+	// the HTTP address of the default node should be empty, while should not
+	// be empty if not default node.
+	if dfltNode {
+		nc.HTTPAddr = ""
+	} else if nc.HTTPAddr == "" {
+		return fmt.Errorf("'http-addr' is required for node '%s'", nc.ID)
+	}
 
-func init() {
-	flag.StringVar(&confPath, "config", "", "path to config file")
-	flag.BoolVar(&showVersion, "version", false, "show version information")
-}
+	if !hasKey("enable-pprof") {
+		nc.EnablePprof = defaultNodeConf.EnablePprof
+	}
 
-// ShowVersion returns true if the version information should be shown.
-func ShowVersion() bool {
-	return showVersion
-}
-
-// Common returns the common/shared configurations.
-func Common() *CommonConf {
-	return &allConf.CommonConf
-}
-
-// Nodes returns all node configurations.
-func Nodes() []*NodeConf {
-	return allConf.Nodes
-}
-
-// NodeByID returns the server configuration by ID.
-// It returns nil if not found.
-func NodeByID(id string) *NodeConf {
-	for _, n := range allConf.Nodes {
-		if n.ID == id {
-			return n
+	if nc.Logger != nil {
+		hasKey1 := func(key string) bool { return hasKey("logger." + key) }
+		if err := nc.Logger.tidy(dflt.Logger, hasKey1); err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-// getConfigPath returns the path of the configuration file.
-func getConfigPath() string {
-	// 1st, try command line argument.
-	if confPath != "" {
-		return confPath
-	}
-
-	// 2nd, try environment variable.
-	path := os.Getenv("XUANDB_CONFIG_PATH")
-	if path != "" {
-		return path
-	}
-
-	// 3rd, try current working directory.
-	path = "xuandb.toml"
-	fi, err := os.Stat(path)
-	if err == nil && !fi.IsDir() {
-		return path
-	}
-
-	// 4th, try executable directory.
-	exe, err := os.Executable()
-	if err == nil {
-		path = filepath.Join(filepath.Dir(exe), path)
-		fi, err = os.Stat(path)
-		if err == nil && !fi.IsDir() {
-			return path
-		}
-	}
-
-	// finally, try O/S specific configuration directory.
-	switch runtime.GOOS {
-	case "linux", "darwin", "freebsd", "openbsd":
-		path = "/etc/xuandb/xuandb.toml"
-	default:
-		return ""
-	}
-	fi, err = os.Stat(path)
-	if err == nil && !fi.IsDir() {
-		return path
-	}
-
-	return ""
-}
-
-// fillDefaults fills the default values for configurations.
-func fillDefaults() {
-	allConf.CommonConf.fillDefaults()
-
-	// find the default node configuration and remove it from the list.
-	var dflt *NodeConf
-	for i, nc := range allConf.Nodes {
-		if nc.ID == "#default#" {
-			dflt = nc
-			continue
-		}
-		// left shift nodes after the default node to remove the default node.
-		if dflt != nil {
-			allConf.Nodes[i-1] = nc
-		}
-	}
-
-	if dflt == nil {
-		// there's no default node, use the global default values.
-		dflt = defaultNodeConf
 	} else {
-		// shrink the slice as we have removed the default node.
-		allConf.Nodes = allConf.Nodes[:len(allConf.Nodes)-1]
-
-		// dflt may have blank fields, fill them with the global default values.
-		if dflt.EnablePprof == "" {
-			dflt.EnablePprof = defaultNodeConf.EnablePprof
-		}
-
-		if dflt.Logger == nil {
-			dflt.Logger = defaultNodeConf.Logger
-		} else {
-			dflt.Logger.fillDefaults(defaultNodeConf.Logger)
-		}
-
-		if dflt.MetaService == nil {
-			dflt.MetaService = defaultMetaServiceConf
-		} else {
-			dflt.MetaService.fillDefaults(defaultNodeConf.MetaService)
-		}
-
-		if dflt.DataService == nil {
-			dflt.DataService = defaultDataServiceConf
-		} else {
-			dflt.DataService.fillDefaults(defaultNodeConf.DataService)
-		}
-
-		if dflt.QueryService == nil {
-			dflt.QueryService = defaultQueryServiceConf
-		} else {
-			dflt.QueryService.fillDefaults(defaultNodeConf.QueryService)
-		}
+		nc.Logger = dflt.Logger
 	}
 
-	// copy default values from default to all nodes.
-	for _, nc := range allConf.Nodes {
-		if nc.EnablePprof == "" {
-			nc.EnablePprof = dflt.EnablePprof
-		}
-
-		if nc.Logger == nil {
-			nc.Logger = dflt.Logger
-		} else {
-			nc.Logger.fillDefaults(dflt.Logger)
-		}
-
-		if nc.MetaService != nil {
-			nc.MetaService.fillDefaults(dflt.MetaService)
-		}
-		if nc.DataService != nil {
-			nc.DataService.fillDefaults(dflt.DataService)
-		}
-		if nc.QueryService != nil {
-			nc.QueryService.fillDefaults(dflt.QueryService)
-		}
-	}
-}
-
-// normalizeAndValidate normalizes & validates the configurations.
-func normalizeAndValidate() error {
-	if err := allConf.normalizeAndValidate(); err != nil {
-		return err
-	}
-
-	numVoter := 0
-	ids := make(map[string]struct{})
-	for _, nc := range allConf.Nodes {
-		if nc.ID == "" {
-			return errors.New("'id' is required for each node")
-		}
-		if _, ok := ids[nc.ID]; ok {
-			return fmt.Errorf("duplicated node id: %s", nc.ID)
-		}
-		ids[nc.ID] = struct{}{}
-
-		if nc.HTTPAddr == "" {
-			return fmt.Errorf("'http-addr' is required for node '%s'", nc.ID)
-		}
-
-		if v, err := strconv.ParseBool(nc.EnablePprof); err == nil {
-			nc.EnablePprof = strconv.FormatBool(v)
-		} else {
-			return fmt.Errorf("invalid 'enable-pprof': %s", nc.EnablePprof)
-		}
-
-		if err := nc.Logger.normalizeAndValidate(); err != nil {
+	if nc.Meta != nil {
+		hasKey1 := func(key string) bool { return hasKey("meta." + key) }
+		if err := nc.Meta.tidy(dflt.Meta, hasKey1, dfltNode); err != nil {
 			return err
 		}
-
-		if err := nc.MetaService.normalizeAndValidate(); err != nil {
-			return err
-		}
-		if nc.MetaService.RaftVoter == "true" {
-			numVoter++
-		}
-
-		if err := nc.DataService.normalizeAndValidate(); err != nil {
-			return err
-		}
-		if err := nc.QueryService.normalizeAndValidate(); err != nil {
-			return err
-		}
+	} else if dfltNode {
+		nc.Meta = dflt.Meta
+	} else {
+		return fmt.Errorf("'meta' section is required for node '%s'", nc.ID)
 	}
 
-	if numVoter == 0 {
-		return fmt.Errorf("no node is a raft voter")
+	if nc.Store != nil {
+		hasKey1 := func(key string) bool { return hasKey("store." + key) }
+		if err := nc.Store.tidy(dflt.Store, hasKey1); err != nil {
+			return err
+		}
+	} else if dfltNode {
+		nc.Store = dflt.Store
 	}
-	if numVoter%2 == 0 {
-		return fmt.Errorf("the count of raft voters should be an odd number")
+
+	if nc.Query != nil {
+		hasKey1 := func(key string) bool { return hasKey("query." + key) }
+		if err := nc.Query.tidy(dflt.Query, hasKey1); err != nil {
+			return err
+		}
+	} else if dfltNode {
+		nc.Query = dflt.Query
 	}
 
 	return nil
-}
-
-// load loads configurations from file, fills missing values with default,
-// normalizes the configurations and validates the results.
-func load() error {
-	path := getConfigPath()
-	if path == "" {
-		return errors.New("no available configuration file")
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = toml.NewDecoder(f).Decode(&allConf)
-	if err != nil {
-		return err
-	}
-
-	fillDefaults()
-
-	return normalizeAndValidate()
 }

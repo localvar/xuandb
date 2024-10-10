@@ -1,6 +1,6 @@
 {
         "gopls": {
-                "build.buildFlags": ["-tags=xuandb_editor"]
+                "build.buildFlags": []
         },
         "makefile.configureOnOpen": false
 }

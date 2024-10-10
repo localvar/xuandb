@@ -30,7 +30,7 @@ client:
 server: generate
 	@echo "Building server..."
 	cd ${PROJECT_DIR} && \
-	go build -tags="xuandb_server" ${BUILDFLAGS} -o build/bin/xuand ./cmd/xuand
+	go build ${BUILDFLAGS} -o build/bin/xuand ./cmd/xuand
 
 generate:
 ifeq ($(wildcard ${GOPATH}/bin/goyacc),)

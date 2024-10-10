@@ -27,6 +27,8 @@ func registerPprofHandlers() {
 }
 
 func main() {
+	var nodeID string
+	flag.StringVar(&nodeID, "node-id", "", "id of this node.")
 	flag.Parse()
 
 	if conf.ShowVersion() {
@@ -39,7 +41,13 @@ func main() {
 		return
 	}
 
-	if err := conf.LoadServer(); err != nil {
+	if nodeID == "" {
+		if nodeID = os.Getenv("XUANDB_NODE_ID"); nodeID == "" {
+			fmt.Println("command line argument 'node-id' is required")
+		}
+	}
+
+	if err := conf.Load(nodeID); err != nil {
 		fmt.Fprintln(os.Stderr, "failed to load configuration:", err.Error())
 		return
 	}
@@ -50,7 +58,7 @@ func main() {
 	// conf package.
 	httpserver.HandleFunc("/debug/config", conf.HandleListConf)
 
-	if conf.CurrentNode().EnablePprof == "true" {
+	if conf.CurrentNode().EnablePprof {
 		registerPprofHandlers()
 	}
 
