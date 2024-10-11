@@ -3,7 +3,7 @@
 
 # `cluster-name` is the name of the cluster, it is used to verify the node join
 # requests, only the nodes with the same cluster name can join the cluster. The
-# default value is the empty string.
+# default value is an empty string.
 cluster-name = ""
 
 # `node` is the node configuration, more than one `node` can be defined with
@@ -12,73 +12,54 @@ cluster-name = ""
 	# `id` is the id of the node, each node should have a unique `id`.
 	#
 	# Here, "#default#" is a special `id` which means this is the the default
-	# node. the default node is not a real node, but provides a template for
-	# other nodes, if a configuration is missing in a node, the corresponding
-	# configuration here will be used. But configurations like 'http-addr' must
-	# be unique for each node, these configurations are ignored even if they
-	# are specified here.
+	# node. the default node is not a real node, but provides default values for
+	# other nodes. Note that configurations like 'http-addr' must be unique for
+	# each node, so they are ignored even if they are specified here.
 	#
-	# The default node is optional, if it is not specified, or if any
-	# configuraion is missing, the build-in default values are used.
-	#
-	# **NOTE**:
-	#
-	# To distinguish an unspecified value from a zero value in Go, the type of
-	# all boolean and number values are string in the configuration. Otherwise,
-	# node configurations may be overwrited by the default incorrectly.
-	
-	# Take `enable-pprof` as an example, if its type is boolean and set to true
-	# in the default node, then all nodes will have `enable-pprof` set to true,
-	# even if some nodes set it to false explicitly.
-	#
-	# Technically, similar issues may happen to strings too, but it is less
-	# likely to happen, we can also require strings to have a non-zero/empty
-	# value to avoid it from design.
+	# The default node is optional, if not defined, or if any configuraion item
+	# is missing, the build-in default is used.
 	id = "#default#"
 
-	# `http-addr` is the address for the HTTP service, it is used to provide
-	# the HTTP API for the node, the format is "host:port". This configuration
-	# must be specified in each node, the value specified in the default node
-	# will be ignored.
+	# `http-addr` is the address for the HTTP service, its format is
+	# "host:port". This configuration must be specified at the concrete nodes,
+	# the value specified at the default node will be ignored.
 	http-addr = ""
 
 	# `enable-pprof` controls whether to enable the pprof service. The pprof
 	# service is used for debugging and performance tuning, it is not
 	# recommended to enable it in production environment.
-	enable-pprof = "false"    # *false | true
+	enable-pprof = false      # *false | true
 
 	# `node.logger` is the logger configurations.
 	[node.logger]
 		# `level` is the minimal log level to emit.
-		level = "debug"		  # debug | *info | warn | error
+		level = "DEBUG"		  # DEBUG | *INFO | WARN | ERROR
 		# `format` is the format of the log records.
 		format = "text"       # text | *json
 		# `add-source` controls whether to add source code position to the log
 		# records.
-		add-source = "false"  # *false | true
+		add-source = false    # *false | true
 		# `output-to` controls where to write the log records.
 		output-to = "stderr"  # *stderr | stdout | discard | {path of a directory}
 
-	# `node.meta-service' is the configurations for the meta service.
-	[node.meta-service]
+	# `node.meta' is the configurations for the meta service.
+	[node.meta]
 		# `raft-voter` specifies whether this node is a voter in the raft
 		# cluster or not. Both voter and non-voter nodes provide a local cache
 		# of the meta data, but voter nodes also participate in raft elections
-		# and log entry commitment, while non-voter nodes does not. This
-		# configuration must be specified in each node, the value specified in
-		# the default node will be ignored.
-		raft-voter = ""       # false | true
+		# and log entry commitment, while non-voter nodes don't.
+		raft-voter = false    # *false | true
 
-		# `raft-addr` is the address for the raft internal communication, the
-		# format is "host:port". This configuration must be specified in each
-		# node, the value specified in the default node will be ignored.
-		# must be specified in all nodes.
+		# `raft-addr` is the address for the raft internal communication, its
+		# format is "host:port". This configuration must be specified at the
+		# concrete nodes, the value specified at the default node will be
+		# ignored.
 		raft-addr = ""
 
 		# `raft-store` is the storage type for raft log store and stable store.
 		# Voter nodes should use "boltdb" in production environment. Non-voter
 		# nodes ignores this configuration and always uses "memory".
-		raft-store = "memory"			# memory | *boltdb
+		raft-store = "memory" # memory | *boltdb
 
 		# `raft-snapshot-store` is the storage type for raft snapshot store.
 		# Voter nodes should use "file" in production environment. Non-voter
@@ -87,62 +68,61 @@ cluster-name = ""
 
 		# `data-dir` is the directory to store meta data, like raft log and
 		# snapshot. If some of the nodes run on a same host, then these nodes
-		# should have their own unique `data-dir`, or there will be undefined
-		# runtime errors.
+		# should have a different `data-dir`, or there will be undefined
+		# runtime errors. For nodes running on different hosts, using a same
+		# `data-dir` could be a good choice to simplify the deployment.
 		data-dir = ""
 
-	# `node.data-service' is the configurations for the data service.
-	[node.data-service]
+	# `node.data' is the configurations for the data service.
+	[node.data]
 
-	# `node.query-service' is the configurations for the query service.
-	[node.query-service]
+	# `node.query' is the configurations for the query service.
+	[node.query]
 
 # `node` with `id` other than "#default#" are configurations for the real nodes.
 [[node]]
+	# `id` and `http-addr` are required for each node.
 	id = "1"
 	http-addr = "127.0.0.1:7001"
 
-	# `node.meta-service' is the configurations for the meta service. This
-	# section is required on all nodes.
-	[node.meta-service]
-		raft-voter = "true"
+	# `node.meta` is required for each node because `node.meta.raft-addr` does.
+	[node.meta]
+		raft-voter = true
 		raft-addr = "127.0.0.1:8001"
 		data-dir = "meta/1"
 
-	# `node.data-service' is the configurations for the data service. This
-	# section is optional, the node will not start the data service if it is
-	# omitted.
-	[node.data-service]
+	# `node.data' is optional, the node will not start the data service if it
+	# is omitted.
+	[node.data]
 
-	# `node.query-service' is the configurations for the data service. This
-	# section is optional, the node will not start the query service if it is
-	# omitted.
-	[node.query-service]
+	# `node.query' is optional, the node will not start the query service if it
+	# is omitted.
+	[node.query]
 
 
 [[node]]
 	id = "2"
 	http-addr = "127.0.0.1:7002"
 
-	[node.meta-service]
-		raft-voter = "true"
+	[node.meta]
+		raft-voter = true
 		raft-addr = "127.0.0.1:8002"
 		data-dir = "meta/2"
 
-	[node.data-service]
+	[node.data]
 
-	[node.query-service]
+	[node.query]
 
 
 [[node]]
 	id = "3"
 	http-addr = "127.0.0.1:7003"
 
-	[node.meta-service]
-		raft-voter = "true"
+	[node.meta]
+		raft-voter = true
 		raft-addr = "127.0.0.1:8003"
 		data-dir = "meta/3"
 
-	[node.data-service]
+	[node.data]
 
-	[node.query-service]
+	[node.query]

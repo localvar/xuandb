@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
 	"github.com/localvar/xuandb/pkg/services/meta"
@@ -27,9 +27,11 @@ func registerPprofHandlers() {
 }
 
 func main() {
+	var nodeID string
+	flag.StringVar(&nodeID, "node-id", "", "id of this node.")
 	flag.Parse()
 
-	if conf.ShowVersion() {
+	if config.ShowVersion() {
 		fmt.Println("xuandb server version:", version.Version())
 		fmt.Println("Built with:", version.GoVersion())
 		fmt.Println("Git commit:", version.Revision())
@@ -39,7 +41,13 @@ func main() {
 		return
 	}
 
-	if err := conf.LoadServer(); err != nil {
+	if nodeID == "" {
+		if nodeID = os.Getenv("XUANDB_NODE_ID"); nodeID == "" {
+			fmt.Println("command line argument 'node-id' is required")
+		}
+	}
+
+	if err := config.Load(nodeID); err != nil {
 		fmt.Fprintln(os.Stderr, "failed to load configuration:", err.Error())
 		return
 	}
@@ -48,9 +56,9 @@ func main() {
 
 	// add an http handler to expose configurations, we cannot do this in the
 	// conf package.
-	httpserver.HandleFunc("/debug/config", conf.HandleListConf)
+	httpserver.HandleFunc("/debug/config", config.HandleList)
 
-	if conf.CurrentNode().EnablePprof == "true" {
+	if config.CurrentNode().EnablePprof {
 		registerPprofHandlers()
 	}
 

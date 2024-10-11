@@ -15,7 +15,6 @@
 		{
 			"name": "Debug XuanDB Server",
 			"type": "go",
-			"buildFlags": ["-tags", "xuandb_server"],
 			"request": "launch",
 			"mode": "debug",
 			"program": "${workspaceFolder}/cmd/xuand",
@@ -25,7 +24,6 @@
 		{
 			"name": "Debug XuanDB Cluster",
 			"type": "go",
-			"buildFlags": ["-tags", "xuandb_server"],
 			"request": "launch",
 			"mode": "debug",
 			"program": "${workspaceFolder}/cmd/xuand",

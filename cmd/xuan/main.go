@@ -4,14 +4,14 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/version"
 )
 
 func main() {
 	flag.Parse()
 
-	if conf.ShowVersion() {
+	if config.ShowVersion() {
 		fmt.Println("xuandb cli version:", version.Version())
 		fmt.Println("Built with:", version.GoVersion())
 		fmt.Println("Git commit:", version.Revision())
@@ -21,7 +21,7 @@ func main() {
 		return
 	}
 
-	if err := conf.LoadClient(); err != nil {
+	if err := config.Load(""); err != nil {
 		fmt.Println("Failed to load configuration:", err)
 		return
 	}

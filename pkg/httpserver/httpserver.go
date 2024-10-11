@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 )
 
 var (
@@ -18,7 +18,7 @@ var (
 // Start starts the http server.
 func Start() {
 	go func() {
-		svr.Addr = conf.CurrentNode().HTTPAddr
+		svr.Addr = config.CurrentNode().HTTPAddr
 		svr.Handler = mux
 
 		err := svr.ListenAndServe()

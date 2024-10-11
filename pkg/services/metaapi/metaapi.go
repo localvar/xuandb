@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/utils"
 )
 
@@ -31,7 +31,7 @@ var leaderAddr atomic.Value
 // sendRequestToLeader sends a request to the leader of the meta service.
 func sendRequestToLeader(buildRequest buildRequestFunc) (resp *http.Response, err error) {
 	err = ErrNoMetaService
-	addr, nodes, idx := "", conf.Nodes(), 0
+	addr, nodes, idx := "", config.Nodes(), 0
 
 	// first we try the leader address we used last time.
 	if la := leaderAddr.Load(); la != nil {
@@ -42,11 +42,11 @@ func sendRequestToLeader(buildRequest buildRequestFunc) (resp *http.Response, er
 	tried := map[string]struct{}{}
 	for idx < len(nodes) {
 		// if we don't have a valid leader address, get the address of the next
-		// node which includes meta service.
+		// node which is a raft voter.
 		if addr == "" {
 			n := nodes[idx]
 			idx++
-			if n.MetaService == nil {
+			if !n.Meta.RaftVoter {
 				continue
 			}
 			addr = n.HTTPAddr

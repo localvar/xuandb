@@ -11,7 +11,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
 )
@@ -24,14 +24,14 @@ var service struct {
 
 // joinCluster joins the current node to the raft cluster specified by addr.
 func joinCluster(addr string) error {
-	msc := conf.CurrentNode().MetaService
-	query := url.Values{
-		"id":    {conf.NodeID()},
-		"addr":  {msc.RaftAddr},
-		"voter": {msc.RaftVoter},
-	}.Encode()
+	mc := config.CurrentNode().Meta
 
-	urlJoin := "http://" + addr + "/meta/node?" + query
+	query := url.Values{"id": {config.NodeID()}, "addr": {mc.RaftAddr}}
+	if mc.RaftVoter {
+		query.Set("voter", "true")
+	}
+
+	urlJoin := "http://" + addr + "/meta/node?" + query.Encode()
 	resp, err := http.Post(urlJoin, "application/json", nil)
 	if err != nil {
 		slog.Error(
@@ -170,27 +170,27 @@ func isLeader() bool {
 }
 
 // createRaftSnapshotStore creates a raft snapshot store.
-func createRaftSnapshotStore(msc *conf.MetaServiceConf) (raft.SnapshotStore, error) {
-	switch msc.RaftSnapshotStore {
+func createRaftSnapshotStore(mc *config.MetaConfig) (raft.SnapshotStore, error) {
+	switch mc.RaftSnapshotStore {
 	case "discard":
 		return raft.NewDiscardSnapshotStore(), nil
 	case "memory":
 		return raft.NewInmemSnapshotStore(), nil
 	case "file":
-		return raft.NewFileSnapshotStoreWithLogger(msc.DataDir, 1, logger.HashiCorp(nil))
+		return raft.NewFileSnapshotStoreWithLogger(mc.DataDir, 1, logger.HashiCorp(nil))
 	default:
 		panic("should not reach here")
 	}
 }
 
 // createRaftStore creates a raft store.
-func createRaftStore(msc *conf.MetaServiceConf) (raft.LogStore, raft.StableStore, error) {
-	switch msc.RaftStore {
+func createRaftStore(mc *config.MetaConfig) (raft.LogStore, raft.StableStore, error) {
+	switch mc.RaftStore {
 	case "memory":
 		db := raft.NewInmemStore()
 		return db, db, nil
 	case "boltdb":
-		opt := raftboltdb.Options{Path: filepath.Join(msc.DataDir, "raft.db")}
+		opt := raftboltdb.Options{Path: filepath.Join(mc.DataDir, "raft.db")}
 		db, err := raftboltdb.New(opt)
 		if err != nil {
 			return nil, nil, err
@@ -203,23 +203,23 @@ func createRaftStore(msc *conf.MetaServiceConf) (raft.LogStore, raft.StableStore
 
 // StartService starts the meta data service.
 func StartService() error {
-	msc := conf.CurrentNode().MetaService
+	mc := config.CurrentNode().Meta
 
 	// create raft and its dependencies objects.
 	logger := logger.HashiCorp(nil)
-	trans, err := raft.NewTCPTransportWithLogger(msc.RaftAddr, nil, 3, 10*time.Second, logger)
+	trans, err := raft.NewTCPTransportWithLogger(mc.RaftAddr, nil, 3, 10*time.Second, logger)
 	if err != nil {
 		slog.Error("failed to create tcp transport", slog.String("error", err.Error()))
 		return err
 	}
 
-	snapshot, err := createRaftSnapshotStore(msc)
+	snapshot, err := createRaftSnapshotStore(mc)
 	if err != nil {
 		slog.Error("failed to create snapshot store", slog.String("error", err.Error()))
 		return err
 	}
 
-	ls, ss, err := createRaftStore(msc)
+	ls, ss, err := createRaftStore(mc)
 	if err != nil {
 		slog.Error("failed to create raft store", slog.String("error", err.Error()))
 		return err
@@ -232,7 +232,7 @@ func StartService() error {
 	}
 
 	cfg := raft.DefaultConfig()
-	cfg.LocalID = raft.ServerID(conf.NodeID())
+	cfg.LocalID = raft.ServerID(config.NodeID())
 	cfg.Logger = logger
 	service.data = newData()
 
@@ -244,7 +244,7 @@ func StartService() error {
 	service.raft = ra
 
 	// only voter nodes expose APIs
-	if msc.RaftVoter == "true" {
+	if mc.RaftVoter {
 		defer func() {
 			// node management APIs
 			httpserver.HandleFunc("GET /meta/node", handleListNode)
@@ -260,20 +260,20 @@ func StartService() error {
 	}
 
 	// try join first, but collect nodes info for bootstrap at the same time.
-	svrs := make([]raft.Server, 0, len(conf.Nodes()))
-	for _, nc := range conf.Nodes() {
+	svrs := make([]raft.Server, 0, len(config.Nodes()))
+	for _, nc := range config.Nodes() {
 		svr := raft.Server{
 			ID:      raft.ServerID(nc.ID),
-			Address: raft.ServerAddress(nc.MetaService.RaftAddr),
+			Address: raft.ServerAddress(nc.Meta.RaftAddr),
 		}
 
-		if nc.MetaService.RaftVoter != "true" {
+		if !nc.Meta.RaftVoter {
 			svr.Suffrage = raft.Nonvoter
 		}
 
 		svrs = append(svrs, svr)
 
-		if svr.Suffrage == raft.Nonvoter || nc.ID == conf.NodeID() {
+		if svr.Suffrage == raft.Nonvoter || nc.ID == config.NodeID() {
 			continue
 		}
 
@@ -284,7 +284,7 @@ func StartService() error {
 
 	// non-voter never bootstraps a cluster, so return and wait the leader to
 	// add this node.
-	if msc.RaftVoter != "true" {
+	if !mc.RaftVoter {
 		slog.Info("cannot join an existing cluster")
 		return nil
 	}

@@ -10,20 +10,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/localvar/xuandb/pkg/conf"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
 )
 
 // Init initialize a logger according to the configuration and set it as the
 // slog.Default(). It also setup HTTP handlers to Get/Set the minimal log level.
 func Init() {
-	lc := conf.CurrentNode().Logger
+	lc := config.CurrentNode().Logger
 
 	lvlVar := &slog.LevelVar{}
-	lvlVar.UnmarshalText([]byte(lc.Level))
+	lvlVar.Set(lc.Level)
 
 	opts := &slog.HandlerOptions{
-		AddSource: lc.AddSource == "true",
+		AddSource: lc.AddSource,
 		Level:     lvlVar,
 	}
 

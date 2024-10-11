@@ -5,21 +5,21 @@ cluster-name = ""
 [[node]]
 	id = "1"
 	http-addr = "127.0.0.1:7001"
-	enable-pprof = "false"
+	enable-pprof = false
 
 	[node.logger]
-		level = "debug"
+		level = "DEBUG"
 		format = "text"
-		add-source = "false"
+		add-source = false
 		output-to = "stderr"
 
-	[node.meta-service]
-		raft-voter = "true"
+	[node.meta]
+		raft-voter = true
 		raft-addr = "127.0.0.1:8001"
 		raft-store = "memory"
 		raft-snapshot-store = "memory"
 		data-dir = "meta/single"
 
-	[node.data-service]
+	[node.data]
 
-	[node.query-service]
+	[node.query]
