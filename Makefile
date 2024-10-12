@@ -38,10 +38,10 @@ ifeq ($(wildcard ${GOPATH}/bin/goyacc),)
 	go install golang.org/x/tools/cmd/goyacc@v0.25.0
 endif
 	cd ${PROJECT_DIR} && \
-	${GOPATH}/bin/goyacc -l -v pkg/parser/yacc.output -o pkg/parser/yacc.go pkg/parser/sql.y && \
-	rm -f pkg/parser/yacc.output
+	${GOPATH}/bin/goyacc -l -v pkg/query/parser/yacc.output -o pkg/query/parser/yacc.go pkg/query/parser/sql.y && \
+	rm -f pkg/query/parser/yacc.output
 
 clean:
 	rm -f ${OUTPUT_DIR}bin/xuand
 	rm -f ${OUTPUT_DIR}bin/xuan
-	rm -f ${PROJECT_DIR}pkg/parser/yacc.output
+	rm -f ${PROJECT_DIR}pkg/query/parser/yacc.output

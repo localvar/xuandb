@@ -10,20 +10,24 @@ import (
 	"sync"
 
 	"github.com/hashicorp/raft"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/services/metaapi"
 	"github.com/localvar/xuandb/pkg/utils"
 )
 
 // Data is the meta data that managed by the meta service.
 type Data struct {
 	lock  sync.Mutex
-	Users map[string]*metaapi.User
+	Users map[string]*User
+	Nodes map[string]*NodeInfo
 }
 
 // newData creates a new Data.
 func newData() *Data {
-	return &Data{Users: map[string]*metaapi.User{}}
+	return &Data{
+		Users: map[string]*User{},
+		Nodes: map[string]*NodeInfo{},
+	}
 }
 
 // List of data operations, for each operation, there are two handlers, one
@@ -61,7 +65,7 @@ func raftApply(w http.ResponseWriter, data []byte) {
 	if err := future.Error(); err != nil {
 		// return a hint of the leader address to the client.
 		addr, _ := service.raft.LeaderWithID()
-		w.Header().Set(metaapi.LeaderHintHeader, string(addr))
+		w.Header().Set(LeaderHintHeader, string(addr))
 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -81,7 +85,7 @@ func raftApply(w http.ResponseWriter, data []byte) {
 // handlers for the add user command.
 type addUserCommand struct {
 	baseCommand
-	metaapi.User
+	User
 }
 
 func handleAddUser(w http.ResponseWriter, r *http.Request) {
@@ -99,9 +103,9 @@ func handleAddUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists for the 1st time.
-	service.data.lock.Lock()
-	u := service.data.Users[strings.ToLower(cmd.Name)]
-	service.data.lock.Unlock()
+	service.metadata.lock.Lock()
+	u := service.metadata.Users[strings.ToLower(cmd.Name)]
+	service.metadata.lock.Unlock()
 	if u != nil {
 		msg := fmt.Sprintf("user already exists: %s", cmd.Name)
 		http.Error(w, msg, http.StatusConflict)
@@ -164,9 +168,9 @@ func handleRemoveUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists for the 1st time.
-	service.data.lock.Lock()
-	u := service.data.Users[strings.ToLower(cmd.Name)]
-	service.data.lock.Unlock()
+	service.metadata.lock.Lock()
+	u := service.metadata.Users[strings.ToLower(cmd.Name)]
+	service.metadata.lock.Unlock()
 
 	// if the user does not exist, consider it as success.
 	if u == nil {
@@ -248,4 +252,45 @@ func (d *Data) Restore(snapshot io.ReadCloser) error {
 		f.m = o
 	*/
 	return nil
+}
+
+// handleListNode handles the list node request.
+func handleListNode(w http.ResponseWriter, _ *http.Request) {
+	ra := service.raft
+
+	_, leaderID := ra.LeaderWithID()
+	future := ra.GetConfiguration()
+	if err := future.Error(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	svrs := future.Configuration().Servers
+
+	result := make([]struct {
+		ID       string `json:"id"`
+		Addr     string `json:"addr"`
+		IsLeader bool   `json:"isLeader"`
+	}, len(svrs))
+
+	for i, svr := range svrs {
+		result[i].ID = string(svr.ID)
+		result[i].Addr = string(svr.Address)
+		result[i].IsLeader = svr.ID == leaderID
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+// registerAPIs registers the meta service API handlers.
+func registerAPIs() {
+	httpserver.HandleFunc("GET /meta/node", handleListNode)
+
+	// only voter nodes expose node & data management APIs
+	if !config.CurrentNode().Meta.RaftVoter {
+		return
+	}
+
+	httpserver.HandleFunc("POST /meta/node", handleAddNode)
+	httpserver.HandleFunc("DELETE /meta/node", handleRemoveNode)
+	registerDataAPIs()
 }

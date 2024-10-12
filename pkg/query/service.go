@@ -5,14 +5,14 @@ import (
 	"net/http"
 
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/parser"
-	"github.com/localvar/xuandb/pkg/services/metaapi"
+	"github.com/localvar/xuandb/pkg/meta"
+	"github.com/localvar/xuandb/pkg/query/parser"
 	"github.com/localvar/xuandb/pkg/utils"
 )
 
 func handleCreateUser(stmt *parser.CreateUserStatement) error {
-	u := metaapi.User{Name: stmt.Name, Password: stmt.Password}
-	return metaapi.AddUser(u)
+	u := &meta.User{Name: stmt.Name, Password: stmt.Password}
+	return meta.AddUser(u)
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {

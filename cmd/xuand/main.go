@@ -12,8 +12,8 @@ import (
 	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
-	"github.com/localvar/xuandb/pkg/services/meta"
-	"github.com/localvar/xuandb/pkg/services/query"
+	"github.com/localvar/xuandb/pkg/meta"
+	"github.com/localvar/xuandb/pkg/query"
 	"github.com/localvar/xuandb/pkg/version"
 )
 

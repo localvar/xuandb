@@ -16,8 +16,8 @@ cmd/xuand/xuand
 *.dylib
 
 # Generated files
-pkg/parser/yacc.go
-pkg/parser/yacc.output
+pkg/query/parser/yacc.go
+pkg/query/parser/yacc.output
 
 # Test binary, built with `go test -c`
 *.test

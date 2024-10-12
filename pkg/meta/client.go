@@ -1,4 +1,4 @@
-package metaapi
+package meta
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/utils"
@@ -104,12 +105,7 @@ func sendRequestToLeader(buildRequest buildRequestFunc) (resp *http.Response, er
 	return nil, err
 }
 
-type User struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
-func AddUser(u User) error {
+func AddUser(u *User) error {
 	data, err := json.Marshal(&u)
 	if err != nil {
 		return err
@@ -127,4 +123,23 @@ func AddUser(u User) error {
 
 	resp.Body.Close()
 	return nil
+}
+
+type User struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+const (
+	NodeRoleMeta  = "meta"
+	NodeRoleData  = "data"
+	NodeRoleQuery = "query"
+)
+
+type NodeInfo struct {
+	Time  time.Time `json:"time"`
+	ID    string    `json:"id"`
+	Addr  string    `json:"address"`
+	Roles []string  `json:"roles"`
+	State string    `json:"state"`
 }
