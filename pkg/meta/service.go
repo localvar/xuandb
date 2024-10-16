@@ -210,14 +210,10 @@ func StartService() error {
 		svcInst.joinOrBootstrap()
 	}
 
+	registerNodeHandlers()
+	registerUserHandlers()
+
 	svcInst.updateNodeInfo()
-
-	// register the meta service API handlers, only voter nodes need to do this.
-	if config.CurrentNode().Meta.RaftVoter {
-		registerNodeAPIHandlers()
-		registerUserAPIHandlers()
-	}
-
 	return nil
 }
 

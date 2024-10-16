@@ -9,17 +9,34 @@ import (
 	"strings"
 
 	"github.com/hashicorp/raft"
+	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
+// Errors for user operations.
 var (
 	ErrUserExists    = xerrors.New(http.StatusConflict, "user already exists")
-	ErrUserNotExists = xerrors.New(http.StatusConflict, "user not exists")
+	ErrUserNotExists = xerrors.New(http.StatusNotFound, "user not exists")
 )
 
-// registerUserAPIHandlers registers the user API handlers.
-func registerUserAPIHandlers() {
+// raft operation names for users.
+const (
+	opCreateUser  = "CreateUser"
+	opDropUser    = "DropUser"
+	opSetPassword = "SetPassword"
+)
+
+// registerUserHandlers registers handlers for user operations.
+func registerUserHandlers() {
+	registerDataApplyFunc(opCreateUser, applyCreateUser)
+	registerDataApplyFunc(opDropUser, applyDropUser)
+	registerDataApplyFunc(opSetPassword, applySetPassword)
+
+	// only voters need to register HTTP handlers.
+	if !config.CurrentNode().Meta.RaftVoter {
+		return
+	}
 	httpserver.HandleFunc("POST /meta/users", handleCreateUser)
 	httpserver.HandleFunc("PUT /meta/users", handleSetPassword)
 	httpserver.HandleFunc("DELETE /meta/users", handleDropUser)
@@ -35,6 +52,28 @@ type User struct {
 type createUserCommand struct {
 	baseCommand
 	User
+}
+
+func applyCreateUser(l *raft.Log) any {
+	var cmd createUserCommand
+	if err := json.Unmarshal(l.Data, &cmd); err != nil {
+		return err
+	}
+
+	s := svcInst
+	md := s.metadata
+	key := strings.ToLower(cmd.Name)
+
+	s.lockMetadata()
+	defer s.unlockMetadata()
+
+	u := md.Users[key]
+	if u == nil {
+		md.Users[key] = &cmd.User
+		return nil
+	}
+
+	return ErrUserExists
 }
 
 func leaderCreateUser(u *User) error {
@@ -87,8 +126,22 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func applyCreateUser(l *raft.Log) any {
-	var cmd createUserCommand
+// CreateUser creates a user.
+func CreateUser(u *User) error {
+	if svcInst.isLeader() {
+		return leaderCreateUser(u)
+	}
+	return sendPostRequestToLeader("/meta/users", u)
+}
+
+// handlers for the drop user command.
+type dropUserCommand struct {
+	baseCommand
+	Name string `json:"name"`
+}
+
+func applyDropUser(l *raft.Log) any {
+	var cmd dropUserCommand
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
 		return err
 	}
@@ -101,18 +154,12 @@ func applyCreateUser(l *raft.Log) any {
 	defer s.unlockMetadata()
 
 	u := md.Users[key]
-	if u == nil {
-		md.Users[key] = &cmd.User
+	if u != nil {
+		delete(md.Users, key)
 		return nil
 	}
 
-	return ErrUserExists
-}
-
-// handlers for the drop user command.
-type dropUserCommand struct {
-	baseCommand
-	Name string `json:"name"`
+	return ErrUserNotExists
 }
 
 func leaderDropUser(name string) error {
@@ -167,8 +214,22 @@ func handleDropUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func applyDropUser(l *raft.Log) any {
-	var cmd dropUserCommand
+// DropUser drops a user.
+func DropUser(name string) error {
+	if svcInst.isLeader() {
+		return leaderDropUser(name)
+	}
+	return sendDeleteRequestToLeader("/meta/users?name=" + url.QueryEscape(name))
+}
+
+// handlers for the set password command.
+type setPasswordCommand struct {
+	baseCommand
+	User
+}
+
+func applySetPassword(l *raft.Log) any {
+	var cmd setPasswordCommand
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
 		return err
 	}
@@ -182,17 +243,11 @@ func applyDropUser(l *raft.Log) any {
 
 	u := md.Users[key]
 	if u != nil {
-		delete(md.Users, key)
+		u.Password = cmd.Password
 		return nil
 	}
 
 	return ErrUserNotExists
-}
-
-// handlers for the set password command.
-type setPasswordCommand struct {
-	baseCommand
-	User
 }
 
 func leaderSetPassword(u *User) error {
@@ -246,26 +301,13 @@ func handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func applySetPassword(l *raft.Log) any {
-	var cmd setPasswordCommand
-	if err := json.Unmarshal(l.Data, &cmd); err != nil {
-		return err
+// SetPassword sets the password of a user.
+func SetPassword(name, password string) error {
+	u := &User{Name: name, Password: password}
+	if svcInst.isLeader() {
+		return leaderSetPassword(u)
 	}
-
-	s := svcInst
-	md := s.metadata
-	key := strings.ToLower(cmd.Name)
-
-	s.lockMetadata()
-	defer s.unlockMetadata()
-
-	u := md.Users[key]
-	if u != nil {
-		u.Password = cmd.Password
-		return nil
-	}
-
-	return ErrUserNotExists
+	return sendPutRequestToLeader("/meta/users", u)
 }
 
 // Users returns all users.
@@ -285,29 +327,4 @@ func Users() []User {
 	})
 
 	return result
-}
-
-// CreateUser creates a user.
-func CreateUser(u *User) error {
-	if svcInst.isLeader() {
-		return leaderCreateUser(u)
-	}
-	return sendPostRequestToLeader("/meta/users", u)
-}
-
-// SetPassword sets the password of a user.
-func SetPassword(name, password string) error {
-	u := &User{Name: name, Password: password}
-	if svcInst.isLeader() {
-		return leaderSetPassword(u)
-	}
-	return sendPutRequestToLeader("/meta/users", u)
-}
-
-// DropUser drops a user.
-func DropUser(name string) error {
-	if svcInst.isLeader() {
-		return leaderDropUser(name)
-	}
-	return sendDeleteRequestToLeader("/meta/users?name=" + url.QueryEscape(name))
 }

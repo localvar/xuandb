@@ -16,8 +16,20 @@ import (
 	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
-// registerNodeAPIHandlers registers the node API handlers.
-func registerNodeAPIHandlers() {
+// raft operation names for nodes.
+const (
+	opUpdateNodeList = "UpdateNodeList"
+)
+
+// registerNodeHandlers registers handlers for node operations.
+func registerNodeHandlers() {
+	registerDataApplyFunc(opUpdateNodeList, applyUpdateNodeList)
+
+	// only voters need to register HTTP handlers.
+	if !config.CurrentNode().Meta.RaftVoter {
+		return
+	}
+
 	httpserver.HandleFunc("POST /meta/nodes", handleAddNode)
 	httpserver.HandleFunc("DELETE /meta/nodes", handleDropNode)
 	httpserver.HandleFunc("POST /meta/node/heartbeat", handleNodeHeartbeat)
@@ -96,7 +108,6 @@ func leaderAddNode(id, addr string, voter bool) error {
 	return xerrors.Wrap(err, http.StatusInternalServerError)
 }
 
-// handleAddNode handles the add node (i.e. join) request.
 func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	var jr joinRequest
 	err := json.NewDecoder(r.Body).Decode(&jr)
@@ -132,6 +143,21 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AddNode add a new node into the cluster.
+func AddNode(id, addr string, voter bool) error {
+	if svcInst.isLeader() {
+		return leaderAddNode(id, addr, voter)
+	}
+
+	jr := joinRequest{
+		ClusterName: config.ClusterName(),
+		ID:          id,
+		Addr:        addr,
+		Voter:       voter,
+	}
+	return sendPostRequestToLeader("/meta/nodes", jr)
 }
 
 func leaderDropNode(id string) error {
@@ -173,6 +199,14 @@ func handleDropNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DropNode removes the current node from the cluster.
+func DropNode(id string) error {
+	if svcInst.isLeader() {
+		leaderDropNode(id)
+	}
+	return sendDeleteRequestToLeader("/meta/nodes?id=" + url.QueryEscape(id))
 }
 
 // NodeRole represents the role of a node in the cluster.
@@ -443,29 +477,6 @@ func (s *service) updateNodeInfo() {
 	}()
 }
 
-// AddNode add a new node into the cluster.
-func AddNode(id, addr string, voter bool) error {
-	if svcInst.isLeader() {
-		return leaderAddNode(id, addr, voter)
-	}
-
-	jr := joinRequest{
-		ClusterName: config.ClusterName(),
-		ID:          id,
-		Addr:        addr,
-		Voter:       voter,
-	}
-	return sendPostRequestToLeader("/meta/nodes", jr)
-}
-
-// DropNode removes the current node from the cluster.
-func DropNode(id string) error {
-	if svcInst.isLeader() {
-		leaderDropNode(id)
-	}
-	return sendDeleteRequestToLeader("/meta/nodes?id=" + url.QueryEscape(id))
-}
-
 // Nodes returns a list of all nodes in the cluster.
 func Nodes() []NodeInfo {
 	result := make([]NodeInfo, 0, len(config.Nodes()))
@@ -546,11 +557,11 @@ func NodeStatuses() []NodeStatus {
 		ns := &result[i]
 		ns.Leader = ns.ID == string(leaderID)
 		if d := now.Sub(ns.LastHeartbeatTime); d >= 30*time.Second {
-			ns.State = "dead"
+			ns.State = "down"
 		} else if d >= 10*time.Second {
 			ns.State = "unknown"
 		} else {
-			ns.State = "alive"
+			ns.State = "up"
 		}
 	}
 

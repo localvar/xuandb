@@ -2,8 +2,8 @@ package meta
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/hashicorp/raft"
@@ -22,28 +22,34 @@ func newData() *Data {
 	}
 }
 
-// baseCommand is the base of all data operation commands.
-type baseCommand struct {
-	Op uint32 `json:"op"`
+// dataApplyFuncs is the list of functions to apply data operations. Most of
+// the operations (but not all) includes 4 functions:
+//
+//   - applyXXXXXX : applies the raft log of the operation to the current node,
+//     it is called by raft and are listed in this map.
+//
+//   - leaderXXXXXX: for leader to create a raft log of the operation and apply
+//     the log to raft.
+//
+//   - handleXXXXXX: for leader to handle client HTTP request of the operation,
+//     it does some validation and then call leaderXXXXXX.
+//
+//   - XXXXXX      : exported function for client to call, it builds and sends
+//     an HTTP request to the leader if called from a follower, and call
+//     leaderXXXXXX directly if called from the leader.
+var dataApplyFuncs = map[string]func(*raft.Log) any{}
+
+// registerDataApplyFunc registers a data apply function.
+func registerDataApplyFunc(op string, fn func(*raft.Log) any) {
+	if dataApplyFuncs[op] != nil {
+		panic("duplicate data apply function: " + op)
+	}
+	dataApplyFuncs[op] = fn
 }
 
-// List of data operations, for each operation, there are two handlers, one
-// for handling client requests, with name like "handleXXXXXX", the other for
-// applying the raft log, with name like "applyXXXXXX".
-const (
-	opUpdateNodeList = iota + 1
-	opCreateUser
-	opDropUser
-	opSetPassword
-	opLast
-)
-
-// dataApplyFuncs is the list of functions to apply data operations.
-var dataApplyFuncs = [opLast]func(*raft.Log) any{
-	opUpdateNodeList: applyUpdateNodeList,
-	opCreateUser:     applyCreateUser,
-	opDropUser:       applyDropUser,
-	opSetPassword:    applySetPassword,
+// baseCommand is the base of all data operation commands.
+type baseCommand struct {
+	Op string `json:"op"`
 }
 
 // raftApply is a helper function to apply a command to the Raft log.
@@ -74,16 +80,16 @@ func (s *service) raftApply(v any) error {
 func (s *service) Apply(l *raft.Log) any {
 	var cmd baseCommand
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
-		return fmt.Errorf("failed to unmarshal command: %w", err)
-	}
-
-	if cmd.Op >= opLast {
-		return fmt.Errorf("invalid command: %d", cmd.Op)
+		slog.Error(
+			"failed to unmarshal data operation command",
+			slog.String("error", err.Error()),
+		)
+		return err
 	}
 
 	fn := dataApplyFuncs[cmd.Op]
 	if fn == nil {
-		return fmt.Errorf("command has no handler: %d", cmd.Op)
+		panic("unknown data operation: " + cmd.Op)
 	}
 
 	return fn(l)
