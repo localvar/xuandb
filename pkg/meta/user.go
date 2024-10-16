@@ -2,7 +2,6 @@ package meta
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -11,14 +10,19 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/utils"
+	"github.com/localvar/xuandb/pkg/xerrors"
+)
+
+var (
+	ErrUserExists    = xerrors.New(http.StatusConflict, "user already exists")
+	ErrUserNotExists = xerrors.New(http.StatusConflict, "user not exists")
 )
 
 // registerUserAPIHandlers registers the user API handlers.
 func registerUserAPIHandlers() {
-	httpserver.HandleFunc("POST /meta/user", handleCreateUser)
-	httpserver.HandleFunc("PUT /meta/user", handleSetPassword)
-	httpserver.HandleFunc("DELETE /meta/user", handleDropUser)
+	httpserver.HandleFunc("POST /meta/users", handleCreateUser)
+	httpserver.HandleFunc("PUT /meta/users", handleSetPassword)
+	httpserver.HandleFunc("DELETE /meta/users", handleDropUser)
 }
 
 // User represents a user.
@@ -37,23 +41,26 @@ func leaderCreateUser(u *User) error {
 	s := svcInst
 	md := s.metadata
 
-	// check if the user already exists for the 1st time.
 	s.lockMetadata()
 	u1 := md.Users[strings.ToLower(u.Name)]
 	s.unlockMetadata()
 	if u1 != nil {
-		return &utils.StatusError{
-			Code: http.StatusConflict,
-			Msg:  fmt.Sprintf("user already exists: %s", u.Name),
-		}
+		slog.Debug("user already exists", slog.String("name", u.Name))
+		return ErrUserExists
 	}
 
 	cmd := createUserCommand{
 		baseCommand: baseCommand{Op: opCreateUser},
 		User:        *u,
 	}
+	err := s.raftApply(&cmd)
+	if err == nil {
+		slog.Info("user created", slog.String("name", u.Name))
+		return nil
+	}
 
-	return s.raftApply(&cmd)
+	slog.Debug("create user failed", slog.String("error", err.Error()))
+	return err
 }
 
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -70,17 +77,14 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("create user command received", slog.String("name", u.Name))
-	if err = leaderCreateUser(&u); err == nil {
+	slog.Debug("create user command received", slog.String("name", u.Name))
+	if err = leaderCreateUser(&u); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
 		return
 	}
 
-	slog.Error("create user failed", slog.String("error", err.Error()))
-	if se, ok := err.(*utils.StatusError); ok {
-		http.Error(w, se.Msg, se.Code)
-	} else {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func applyCreateUser(l *raft.Log) any {
@@ -91,26 +95,18 @@ func applyCreateUser(l *raft.Log) any {
 
 	s := svcInst
 	md := s.metadata
-
-	// though we have made a check before, it is still possible that the user
-	// already exists because of the 2 phase commit, so check again here.
 	key := strings.ToLower(cmd.Name)
+
 	s.lockMetadata()
+	defer s.unlockMetadata()
+
 	u := md.Users[key]
 	if u == nil {
 		md.Users[key] = &cmd.User
-	}
-	s.unlockMetadata()
-
-	if u == nil {
-		slog.Info("user created", slog.String("name", cmd.Name))
 		return nil
 	}
 
-	return &utils.StatusError{
-		Code: http.StatusConflict,
-		Msg:  fmt.Sprintf("user already exists: %s", cmd.Name),
-	}
+	return ErrUserExists
 }
 
 // handlers for the drop user command.
@@ -129,8 +125,9 @@ func leaderDropUser(name string) error {
 	u := md.Users[key]
 	s.unlockMetadata()
 
+	// treat the user does not exist as a successful operation.
 	if u == nil {
-		slog.Info("user does not exist", slog.String("name", name))
+		slog.Debug("user does not exist", slog.String("name", name))
 		return nil
 	}
 
@@ -138,7 +135,19 @@ func leaderDropUser(name string) error {
 		baseCommand: baseCommand{Op: opDropUser},
 		Name:        name,
 	}
-	return s.raftApply(&cmd)
+	err := s.raftApply(&cmd)
+	if err == nil {
+		slog.Info("user dropped", slog.String("name", name))
+		return nil
+	}
+
+	if err == ErrUserNotExists {
+		slog.Debug("user does not exist", slog.String("name", name))
+		return nil
+	}
+
+	slog.Debug("drop user failed", slog.String("error", err.Error()))
+	return err
 }
 
 func handleDropUser(w http.ResponseWriter, r *http.Request) {
@@ -148,15 +157,14 @@ func handleDropUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("drop user command received", slog.String("name", name))
-	err := leaderDropUser(name)
-
-	slog.Error("drop user failed", slog.String("error", err.Error()))
-	if se, ok := err.(*utils.StatusError); ok {
-		http.Error(w, se.Msg, se.Code)
-	} else {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	slog.Debug("drop user command received", slog.String("name", name))
+	if err := leaderDropUser(name); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
+		return
 	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func applyDropUser(l *raft.Log) any {
@@ -167,22 +175,18 @@ func applyDropUser(l *raft.Log) any {
 
 	s := svcInst
 	md := s.metadata
-
 	key := strings.ToLower(cmd.Name)
+
 	s.lockMetadata()
+	defer s.unlockMetadata()
+
 	u := md.Users[key]
 	if u != nil {
 		delete(md.Users, key)
-	}
-	s.unlockMetadata()
-
-	if u != nil {
-		slog.Info("user dropped", slog.String("name", cmd.Name))
-	} else {
-		slog.Info("user does not exist", slog.String("name", cmd.Name))
+		return nil
 	}
 
-	return nil
+	return ErrUserNotExists
 }
 
 // handlers for the set password command.
@@ -200,18 +204,22 @@ func leaderSetPassword(u *User) error {
 	u1 := md.Users[strings.ToLower(u.Name)]
 	s.unlockMetadata()
 	if u1 == nil {
-		return &utils.StatusError{
-			Code: http.StatusNotFound,
-			Msg:  fmt.Sprintf("user not exists: %s", u.Name),
-		}
+		slog.Debug("user not exists", slog.String("name", u.Name))
+		return ErrUserNotExists
 	}
 
 	cmd := setPasswordCommand{
 		baseCommand: baseCommand{Op: opSetPassword},
 		User:        *u,
 	}
+	err := s.raftApply(&cmd)
+	if err == nil {
+		slog.Info("set password succeeded", slog.String("name", u.Name))
+		return nil
+	}
 
-	return s.raftApply(&cmd)
+	slog.Debug("set password failed", slog.String("error", err.Error()))
+	return err
 }
 
 func handleSetPassword(w http.ResponseWriter, r *http.Request) {
@@ -228,17 +236,14 @@ func handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("set password command received", slog.String("name", u.Name))
-	if err = leaderSetPassword(&u); err == nil {
+	slog.Debug("set password command received", slog.String("name", u.Name))
+	if err = leaderSetPassword(&u); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
 		return
 	}
 
-	slog.Error("set password failed", slog.String("error", err.Error()))
-	if se, ok := err.(*utils.StatusError); ok {
-		http.Error(w, se.Msg, se.Code)
-	} else {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func applySetPassword(l *raft.Log) any {
@@ -249,23 +254,18 @@ func applySetPassword(l *raft.Log) any {
 
 	s := svcInst
 	md := s.metadata
-
-	// though we have made a check before, it is still possible that the user
-	// already exists because of the 2 phase commit, so check again here.
 	key := strings.ToLower(cmd.Name)
+
 	s.lockMetadata()
+	defer s.unlockMetadata()
+
 	u := md.Users[key]
 	if u != nil {
 		u.Password = cmd.Password
-	}
-	s.unlockMetadata()
-
-	if u == nil {
-		slog.Info("user not exists", slog.String("name", cmd.Name))
 		return nil
 	}
 
-	return nil
+	return ErrUserNotExists
 }
 
 // Users returns all users.
@@ -292,7 +292,7 @@ func CreateUser(u *User) error {
 	if svcInst.isLeader() {
 		return leaderCreateUser(u)
 	}
-	return sendPostRequestToLeader("/meta/user", u)
+	return sendPostRequestToLeader("/meta/users", u)
 }
 
 // SetPassword sets the password of a user.
@@ -301,7 +301,7 @@ func SetPassword(name, password string) error {
 	if svcInst.isLeader() {
 		return leaderSetPassword(u)
 	}
-	return sendPutRequestToLeader("/meta/user", u)
+	return sendPutRequestToLeader("/meta/users", u)
 }
 
 // DropUser drops a user.
@@ -309,5 +309,5 @@ func DropUser(name string) error {
 	if svcInst.isLeader() {
 		return leaderDropUser(name)
 	}
-	return sendDeleteRequestToLeader("/meta/user?name=" + url.QueryEscape(name))
+	return sendDeleteRequestToLeader("/meta/users?name=" + url.QueryEscape(name))
 }

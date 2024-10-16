@@ -6,28 +6,25 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/localvar/xuandb/pkg/utils"
+	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
-// ErrNoMetaService means there's no available meta serice in the cluster.
-var ErrNoMetaService = &utils.StatusError{
-	Code: http.StatusServiceUnavailable,
-	Msg:  "no meta service available",
-}
+// ErrMetaServiceUnavailable means there's no available meta serice.
+var ErrMetaServiceUnavailable = xerrors.New(http.StatusServiceUnavailable, "meta service is unavailable")
 
 // sendRequestToLeader sends an HTTP post request to the leader node of the
 // meta service.
 func sendRequestToLeader(method, pathAndQuery string, data any) error {
 	addr := LeaderHTTPAddr()
 	if addr == "" {
-		return ErrNoMetaService
+		return ErrMetaServiceUnavailable
 	}
 
 	var body io.Reader
 	if data != nil {
 		d, err := json.Marshal(data)
 		if err != nil {
-			return err
+			return xerrors.Wrap(err, http.StatusInternalServerError)
 		}
 		body = bytes.NewReader(d)
 	}
@@ -35,7 +32,7 @@ func sendRequestToLeader(method, pathAndQuery string, data any) error {
 	url := "http://" + addr + pathAndQuery
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		return err
+		return xerrors.Wrap(err, http.StatusInternalServerError)
 	}
 
 	if body != nil {
@@ -44,7 +41,7 @@ func sendRequestToLeader(method, pathAndQuery string, data any) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return xerrors.Wrap(err, http.StatusInternalServerError)
 	}
 
 	defer func() {
@@ -56,7 +53,7 @@ func sendRequestToLeader(method, pathAndQuery string, data any) error {
 		return nil
 	}
 
-	return utils.FromHTTPResponse(resp)
+	return xerrors.FromHTTPResponse(resp)
 }
 
 func sendPostRequestToLeader(pathAndQuery string, data any) error {

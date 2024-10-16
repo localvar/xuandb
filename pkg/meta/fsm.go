@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/hashicorp/raft"
-	"github.com/localvar/xuandb/pkg/utils"
+	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
 // Data is the meta data that managed by the meta service.
@@ -50,15 +50,12 @@ var dataApplyFuncs = [opLast]func(*raft.Log) any{
 func (s *service) raftApply(v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return &utils.StatusError{
-			Code: http.StatusInternalServerError,
-			Msg:  err.Error(),
-		}
+		return xerrors.Wrap(err, http.StatusInternalServerError)
 	}
 
 	future := s.raft.Apply(data, 0)
 	if err := future.Error(); err != nil {
-		return err
+		return xerrors.Wrap(err, http.StatusInternalServerError)
 	}
 
 	resp := future.Response()
@@ -66,10 +63,8 @@ func (s *service) raftApply(v any) error {
 		return nil
 	}
 
-	if se, ok := resp.(*utils.StatusError); ok {
-		return se
-	} else if err, ok := resp.(error); ok {
-		return err
+	if err, ok := resp.(error); ok {
+		return xerrors.Wrap(err, http.StatusInternalServerError)
 	} else {
 		panic("unexpected response")
 	}

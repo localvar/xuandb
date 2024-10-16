@@ -7,7 +7,7 @@ import (
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/meta"
 	"github.com/localvar/xuandb/pkg/query/parser"
-	"github.com/localvar/xuandb/pkg/utils"
+	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
 func handleCreateUser(stmt *parser.CreateUserStatement) error {
@@ -39,8 +39,8 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if se, ok := err.(*utils.StatusError); ok {
-		http.Error(w, se.Msg, se.Code)
+	if se, ok := err.(*xerrors.StatusError); ok {
+		http.Error(w, se.Msg, se.StatusCode)
 	} else {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

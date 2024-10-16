@@ -6,19 +6,20 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
 	"github.com/hashicorp/raft"
 	"github.com/localvar/xuandb/pkg/config"
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/utils"
+	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
 // registerNodeAPIHandlers registers the node API handlers.
 func registerNodeAPIHandlers() {
-	httpserver.HandleFunc("POST /meta/node", handleJoin)
-	httpserver.HandleFunc("DELETE /meta/node", handleDropNode)
+	httpserver.HandleFunc("POST /meta/nodes", handleAddNode)
+	httpserver.HandleFunc("DELETE /meta/nodes", handleDropNode)
 	httpserver.HandleFunc("POST /meta/node/heartbeat", handleNodeHeartbeat)
 }
 
@@ -40,7 +41,7 @@ func join(addr string) error {
 		Voter:       mc.RaftVoter,
 	})
 
-	urlJoin := "http://" + addr + "/meta/node"
+	urlJoin := "http://" + addr + "/meta/nodes"
 	resp, err := http.Post(urlJoin, "application/json", bytes.NewReader(jr))
 	if err != nil {
 		slog.Error(
@@ -61,7 +62,7 @@ func join(addr string) error {
 		return nil
 	}
 
-	err = utils.FromHTTPResponse(resp)
+	err = xerrors.FromHTTPResponse(resp)
 	slog.Error(
 		"failed to join cluster",
 		slog.String("leaderAddr", addr),
@@ -71,8 +72,32 @@ func join(addr string) error {
 	return err
 }
 
-// handleJoin handles the join request.
-func handleJoin(w http.ResponseWriter, r *http.Request) {
+func leaderAddNode(id, addr string, voter bool) error {
+	var err error
+
+	sid, saddr := raft.ServerID(id), raft.ServerAddress(addr)
+	if voter {
+		err = svcInst.raft.AddVoter(sid, saddr, 0, 0).Error()
+	} else {
+		err = svcInst.raft.AddNonvoter(sid, saddr, 0, 0).Error()
+	}
+
+	if err == nil {
+		slog.Info("node added", slog.String("nodeId", id))
+		return nil
+	}
+
+	slog.Debug(
+		"failed to add node",
+		slog.String("nodeId", id),
+		slog.String("error", err.Error()),
+	)
+
+	return xerrors.Wrap(err, http.StatusInternalServerError)
+}
+
+// handleAddNode handles the add node (i.e. join) request.
+func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	var jr joinRequest
 	err := json.NewDecoder(r.Body).Decode(&jr)
 	if err != nil {
@@ -88,38 +113,40 @@ func handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info(
+	slog.Debug(
 		"add node request received",
 		slog.String("nodeId", jr.ID),
 		slog.String("nodeAddr", jr.Addr),
 	)
 
-	s := svcInst
-	if !s.isLeader() {
-		slog.Info("refuse due to not leader", slog.String("nodeId", jr.ID))
+	if !svcInst.isLeader() {
+		slog.Debug("refuse due to not leader", slog.String("nodeId", jr.ID))
 		http.Error(w, "not leader", http.StatusServiceUnavailable)
 		return
 	}
 
-	id, addr := raft.ServerID(jr.ID), raft.ServerAddress(jr.Addr)
-	if jr.Voter {
-		err = s.raft.AddVoter(id, addr, 0, 0).Error()
-	} else {
-		err = s.raft.AddNonvoter(id, addr, 0, 0).Error()
-	}
-
-	if err == nil {
-		slog.Info("node added", slog.String("nodeId", jr.ID))
+	if err = leaderAddNode(jr.ID, jr.Addr, jr.Voter); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
 		return
 	}
 
-	slog.Error(
-		"failed to add node",
-		slog.String("nodeId", jr.ID),
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func leaderDropNode(id string) error {
+	err := svcInst.raft.RemoveServer(raft.ServerID(id), 0, 0).Error()
+	if err == nil {
+		slog.Info("node dropped", slog.String("nodeId", id))
+		return nil
+	}
+
+	slog.Debug(
+		"failed to drop node",
+		slog.String("nodeId", id),
 		slog.String("error", err.Error()),
 	)
-
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	return xerrors.Wrap(err, http.StatusInternalServerError)
 }
 
 // handleDropNode handles the drop node request.
@@ -130,28 +157,22 @@ func handleDropNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("drop node request received", slog.String("nodeId", id))
+	slog.Debug("drop node request received", slog.String("nodeId", id))
 
 	s := svcInst
 	if !s.isLeader() {
-		slog.Info("refuse due to not leader", slog.String("nodeId", id))
+		slog.Debug("refuse due to not leader", slog.String("nodeId", id))
 		http.Error(w, "not leader", http.StatusServiceUnavailable)
 		return
 	}
 
-	err := s.raft.RemoveServer(raft.ServerID(id), 0, 0).Error()
-	if err == nil {
-		slog.Info("node dropped", slog.String("nodeId", id))
+	if err := leaderDropNode(id); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
 		return
 	}
 
-	slog.Error(
-		"failed to drop node",
-		slog.String("nodeId", id),
-		slog.String("error", err.Error()),
-	)
-
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // NodeRole represents the role of a node in the cluster.
@@ -424,24 +445,25 @@ func (s *service) updateNodeInfo() {
 
 // AddNode add a new node into the cluster.
 func AddNode(id, addr string, voter bool) error {
+	if svcInst.isLeader() {
+		return leaderAddNode(id, addr, voter)
+	}
+
 	jr := joinRequest{
 		ClusterName: config.ClusterName(),
 		ID:          id,
 		Addr:        addr,
 		Voter:       voter,
 	}
-	if svcInst.isLeader() {
-		// TODO
-	}
-	return sendPostRequestToLeader("/meta/node", jr)
+	return sendPostRequestToLeader("/meta/nodes", jr)
 }
 
 // DropNode removes the current node from the cluster.
 func DropNode(id string) error {
 	if svcInst.isLeader() {
-		// TODO
+		leaderDropNode(id)
 	}
-	return sendDeleteRequestToLeader("/meta/node?id=" + id)
+	return sendDeleteRequestToLeader("/meta/nodes?id=" + url.QueryEscape(id))
 }
 
 // Nodes returns a list of all nodes in the cluster.
