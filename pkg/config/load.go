@@ -42,18 +42,24 @@ func ClusterName() string {
 	return allCfg.ClusterName
 }
 
-// All returns all of the configurations.
+// All returns all of the configurations. Note that nodes can be added or
+// removed dynamically, but the return value of this function does not change
+// accordingly.
 func All() *Config {
 	return allCfg
 }
 
-// Nodes returns all node configurations.
+// Nodes returns configurations of all nodes, note that nodes can be added or
+// removed dynamically, but the return value of this function does not change
+// accordingly. To get a list of nodes at run time, call 'meta.Nodes' instead.
 func Nodes() []*NodeConfig {
 	return allCfg.Nodes
 }
 
-// NodeByID returns the server configuration by ID.
-// It returns nil if not found.
+// NodeByID returns the server configuration by ID. It returns nil if not found.
+// Note that nodes can be added or removed dynamically, but the return value of
+// this function does not change accordingly. To get a node at run time, call
+// 'meta.NodeByID' instead.
 func NodeByID(id string) *NodeConfig {
 	for _, n := range allCfg.Nodes {
 		if n.ID == id {
@@ -69,7 +75,7 @@ func NodeID() string {
 	return curNodeCfg.ID
 }
 
-// CurrentNode returns configuration for current node.
+// CurrentNode returns configuration of the current node.
 func CurrentNode() *NodeConfig {
 	return curNodeCfg
 }

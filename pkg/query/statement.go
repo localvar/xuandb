@@ -9,5 +9,5 @@ type CreateUserStatement parser.CreateUserStatement
 
 func (s *CreateUserStatement) Execute() error {
 	u := &meta.User{Name: s.Name, Password: s.Password}
-	return meta.AddUser(u)
+	return meta.CreateUser(u)
 }

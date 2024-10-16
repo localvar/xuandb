@@ -12,7 +12,7 @@ import (
 
 func handleCreateUser(stmt *parser.CreateUserStatement) error {
 	u := &meta.User{Name: stmt.Name, Password: stmt.Password}
-	return meta.AddUser(u)
+	return meta.CreateUser(u)
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
