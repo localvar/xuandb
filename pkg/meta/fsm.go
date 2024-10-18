@@ -22,6 +22,47 @@ func newData() *Data {
 	}
 }
 
+// clone clones the data.
+func (d *Data) clone() *Data {
+	r := newData()
+
+	for k, v := range d.Users {
+		u := *v
+		r.Users[k] = &u
+	}
+
+	return r
+}
+
+// Persist implements the raft.FSMSnapshot interface.
+func (d *Data) Persist(sink raft.SnapshotSink) error {
+	err := func() error {
+		// Encode data.
+		b, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+
+		// Write data to sink.
+		if _, err := sink.Write(b); err != nil {
+			return err
+		}
+
+		// Close the sink.
+		return sink.Close()
+	}()
+
+	if err != nil {
+		sink.Cancel()
+	}
+
+	return err
+}
+
+// Release implements the raft.FSMSnapshot interface.
+func (d *Data) Release() {
+}
+
 // dataApplyFuncs is the list of functions to apply data operations. Most of
 // the operations (but not all) includes 4 functions:
 //
@@ -97,20 +138,19 @@ func (s *service) Apply(l *raft.Log) any {
 
 // Snapshot implements the raft.FSM interface.
 func (s *service) Snapshot() (raft.FSMSnapshot, error) {
-	return &snapshot{store: map[string]string{}}, nil
+	s.lockMetadata()
+	d := s.metadata.clone()
+	s.unlockMetadata()
+
+	return d, nil
 }
 
 // Restore implements the raft.FSM interface.
-func (s *service) Restore(io.ReadCloser) error {
-	/*
-		o := make(map[string]string)
-		if err := json.NewDecoder(rc).Decode(&o); err != nil {
-			return err
-		}
-
-		// Set the state from the snapshot, no lock required according to
-		// Hashicorp docs.
-		f.m = o
-	*/
+func (s *service) Restore(rc io.ReadCloser) error {
+	d := newData()
+	if err := json.NewDecoder(rc).Decode(d); err != nil {
+		return err
+	}
+	s.metadata = d
 	return nil
 }
