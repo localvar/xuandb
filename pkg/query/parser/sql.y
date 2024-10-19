@@ -4,6 +4,7 @@ package parser
 import "net/netip"
 import "time"
 
+import "github.com/localvar/xuandb/pkg/meta"
 import "github.com/localvar/xuandb/pkg/query/ast"
 %}
 
@@ -131,7 +132,7 @@ ADDR_PORT:
 CREATE_USER_STATEMENT:
     CREATE USER IDENT WITH PASSWORD VAL_STR
     {
-        $$ = &ast.CreateUserStatement{Name: $3, Password: $6}
+        $$ = &ast.CreateUserStatement{ meta.User{Name: $3, Password: $6} }
     }
 
 DROP_USER_STATEMENT:
@@ -155,7 +156,7 @@ SHOW_USER_STATEMENT:
 CREATE_DATABASE_STATEMENT:
     CREATE DATABASE IDENT WITH DURATION VAL_DURATION
     {
-        $$ = &ast.CreateDatabaseStatement{Name: $3, Duration: time.Duration($6)}
+        $$ = &ast.CreateDatabaseStatement{ meta.Database{Name: $3, Duration: time.Duration($6)} }
     }
 
 DROP_DATABASE_STATEMENT:

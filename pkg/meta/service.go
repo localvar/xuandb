@@ -203,6 +203,7 @@ func StartService() error {
 
 	registerNodeHandlers()
 	registerUserHandlers()
+	registerDatabaseHandlers()
 
 	svcInst.updateNodeInfo()
 	return nil

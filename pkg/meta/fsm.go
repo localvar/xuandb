@@ -23,14 +23,16 @@ import (
 // The update operations are done by the dataApplyFuncs to make the code more
 // readable and maintainable.
 type Data struct {
-	l     sync.Mutex       `json:"-"`
-	Users map[string]*User `json:"users"`
+	l         sync.Mutex           `json:"-"`
+	Users     map[string]*User     `json:"users"`
+	Databases map[string]*Database `json:"databases"`
 }
 
 // newData creates a new Data.
 func newData() *Data {
 	return &Data{
-		Users: map[string]*User{},
+		Users:     map[string]*User{},
+		Databases: map[string]*Database{},
 	}
 }
 

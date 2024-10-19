@@ -3,7 +3,6 @@ package ast
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/localvar/xuandb/pkg/meta"
 )
@@ -14,16 +13,11 @@ type Statement interface {
 
 // CreateUserStatement represents a command for creating a new user.
 type CreateUserStatement struct {
-	// Name of the user to be created.
-	Name string
-
-	// User's password.
-	Password string
+	meta.User
 }
 
 func (stmt *CreateUserStatement) Execute(w http.ResponseWriter, r *http.Request) error {
-	u := &meta.User{Name: stmt.Name, Password: stmt.Password}
-	if err := meta.CreateUser(u); err != nil {
+	if err := meta.CreateUser(&stmt.User); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -100,16 +94,14 @@ func (stmt *ShowNodeStatement) Execute(w http.ResponseWriter, r *http.Request) e
 }
 
 type CreateDatabaseStatement struct {
-	Name     string
-	Duration time.Duration
+	meta.Database
 }
 
 func (stmt *CreateDatabaseStatement) Execute(w http.ResponseWriter, r *http.Request) error {
-	/*	if err := meta.CreateDatabase(stmt.Name, stmt.Duration); err != nil {
-			return err
-		}
-		w.WriteHeader(http.StatusNoContent)
-	*/
+	if err := meta.CreateDatabase(&stmt.Database); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
@@ -118,11 +110,10 @@ type DropDatabaseStatement struct {
 }
 
 func (stmt *DropDatabaseStatement) Execute(w http.ResponseWriter, r *http.Request) error {
-	/*	if err := meta.DropDatabase(stmt.Name); err != nil
-			return err
-		}
-		w.WriteHeader(http.StatusNoContent)
-	*/
+	if err := meta.DropDatabase(stmt.Name); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
@@ -130,9 +121,8 @@ type ShowDatabaseStatement struct {
 }
 
 func (stmt *ShowDatabaseStatement) Execute(w http.ResponseWriter, r *http.Request) error {
-	/*	dbs := meta.Databases()
-		json.NewEncoder(w).Encode(dbs)
-	*/
+	dbs := meta.Databases()
+	json.NewEncoder(w).Encode(dbs)
 	return nil
 }
 
