@@ -1,10 +1,15 @@
 %{
 package parser
+
+import "net/netip"
+import "time"
+
+import "github.com/localvar/xuandb/pkg/query/ast"
 %}
 
 %union {
-	stmt    Statement
-    expr    Expr
+	stmt    ast.Statement
+    expr    ast.Expr
     str     string
     int     uint64
     float   float64
@@ -16,9 +21,10 @@ package parser
 %token<str>    IDENT
 
 // Keywords
-%token CREATE    USER     WITH     PASSWORD   SELECT     FROM     WHERE
-       GROUP     BY       LIMIT    OFFSET     JOIN       BETWEEN  IN
-       DATABASE  DURATION ALTER    DROP
+%token ALTER   CREATE   DELETE   DROP   SET   SELECT   SHOW   UPDATE
+       USER   DATABASE   NODE   CLUSTER   VOTER   NONVOTER
+       AS   AT   BY   FOR   IN   ON   WHERE   WITH
+       GROUP   LIMIT   OFFSET   JOIN   BETWEEN   DURATION   PASSWORD
 
 // comments
 %token<str>    COMMENT
@@ -47,10 +53,16 @@ package parser
 
 // ERR_TOKEN represents an invalid token, to make test cases work, it must be
 // the last token also.
-%token<str>    ERR_TOKEN
+%token<str> ERR_TOKEN
+
+%type<str>  ADDR_PORT
 
 // Statements
-%type<stmt>    STATEMENT CREATE_USER_STATEMENT CREATE_DATABASE_STATEMENT
+%type<stmt> STATEMENT
+            CREATE_USER_STATEMENT SHOW_USER_STATEMENT DROP_USER_STATEMENT SET_PASSWORD_STATEMENT
+            CREATE_DATABASE_STATEMENT DROP_DATABASE_STATEMENT SHOW_DATABASE_STATEMENT
+            JOIN_NODE_STATEMENT DROP_NODE_STATEMENT SHOW_NODE_STATEMENT
+
 
 %%
 
@@ -60,27 +72,126 @@ STATEMENT:
         yylex.(*Lexer).Result = $1
 		$$ = $1
 	}
+    | DROP_USER_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+		$$ = $1
+    }
+    | SET_PASSWORD_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+		$$ = $1
+    }
+    | SHOW_USER_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
     | CREATE_DATABASE_STATEMENT
     {
         yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+    | DROP_DATABASE_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+    | SHOW_DATABASE_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+    | JOIN_NODE_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+    | DROP_NODE_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+    | SHOW_NODE_STATEMENT
+    {
+        yylex.(*Lexer).Result = $1
+        $$ = $1
+    }
+
+ADDR_PORT:
+    VAL_STR
+    {
+        if _, err := netip.ParseAddrPort($1); err != nil {
+            yylex.Error("invalid network address")
+            goto ret1
+        }
         $$ = $1
     }
 
 CREATE_USER_STATEMENT:
     CREATE USER IDENT WITH PASSWORD VAL_STR
     {
-        stmt := &CreateUserStatement{}
-        stmt.Name = $3
-        stmt.Password = $6
-        $$ = stmt
+        $$ = &ast.CreateUserStatement{Name: $3, Password: $6}
+    }
+
+DROP_USER_STATEMENT:
+    DROP USER IDENT
+    {
+        $$ = &ast.DropUserStatement{Name: $3}
+    }
+
+SET_PASSWORD_STATEMENT:
+    SET PASSWORD FOR IDENT OP_EQU VAL_STR
+    {
+        $$ = &ast.SetPasswordStatement{Name: $4, Password: $6}
+    }
+
+SHOW_USER_STATEMENT:
+    SHOW USER
+    {
+        $$ = &ast.ShowUserStatement{}
     }
 
 CREATE_DATABASE_STATEMENT:
     CREATE DATABASE IDENT WITH DURATION VAL_DURATION
     {
-        $$ = nil
+        $$ = &ast.CreateDatabaseStatement{Name: $3, Duration: time.Duration($6)}
     }
 
+DROP_DATABASE_STATEMENT:
+    DROP DATABASE IDENT
+    {
+        $$ = &ast.DropDatabaseStatement{Name: $3}
+    }
+
+SHOW_DATABASE_STATEMENT:
+    SHOW DATABASE
+    {
+        $$ = &ast.ShowDatabaseStatement{}
+    }
+
+JOIN_NODE_STATEMENT:
+    JOIN NODE IDENT AT ADDR_PORT AS VOTER
+    {
+        $$ = &ast.JoinNodeStatement{ID: $3, Addr: $5, Voter: true}
+    }
+    | JOIN NODE IDENT AT ADDR_PORT AS NONVOTER
+    {
+        $$ = &ast.JoinNodeStatement{ID: $3, Addr: $5, Voter: false}
+    }
+
+DROP_NODE_STATEMENT:
+    DROP NODE IDENT
+    {
+        $$ = &ast.DropNodeStatement{ID: $3}
+    }
+
+SHOW_NODE_STATEMENT:
+    SHOW NODE
+    {
+        $$ = &ast.ShowNodeStatement{}
+    }
+        
 %%
 
 // keywords maps of keyword strings to their corresponding IDs, keywords that

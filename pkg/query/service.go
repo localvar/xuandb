@@ -5,15 +5,9 @@ import (
 	"net/http"
 
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/meta"
 	"github.com/localvar/xuandb/pkg/query/parser"
 	"github.com/localvar/xuandb/pkg/xerrors"
 )
-
-func handleCreateUser(stmt *parser.CreateUserStatement) error {
-	u := &meta.User{Name: stmt.Name, Password: stmt.Password}
-	return meta.CreateUser(u)
-}
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.FormValue("q")
@@ -28,17 +22,18 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("query request received")
+	slog.Debug("query received", slog.String("query", q))
 
-	switch s := stmt.(type) {
-	case *parser.CreateUserStatement:
-		err = handleCreateUser(s)
-	}
-
+	err = stmt.Execute(w, r)
 	if err == nil {
 		return
 	}
 
+	slog.Error(
+		"failed to execute query",
+		slog.String("query", q),
+		slog.String("error", err.Error()),
+	)
 	if se, ok := err.(*xerrors.StatusError); ok {
 		http.Error(w, se.Msg, se.StatusCode)
 	} else {

@@ -8,7 +8,7 @@ cluster-name = ""
 	enable-pprof = false
 
 	[node.logger]
-		level = "DEBUG"
+		level = "INFO"
 		format = "text"
 		add-source = false
 		output-to = "stderr"

@@ -8,13 +8,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/localvar/xuandb/pkg/query/ast"
 	"github.com/localvar/xuandb/pkg/utils"
 )
 
 // Lexer implements a lexer for the parser.
 type Lexer struct {
 	Scanner
-	Result      Statement
+	Result      ast.Statement
 	ReportError func(msg string)
 }
 

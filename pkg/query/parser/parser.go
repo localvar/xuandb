@@ -4,9 +4,11 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+
+	"github.com/localvar/xuandb/pkg/query/ast"
 )
 
-func Parse(input string) (Statement, error) {
+func Parse(input string) (ast.Statement, error) {
 	slog.Debug("parse query", slog.String("input", input))
 
 	errs := make([]string, 0)
