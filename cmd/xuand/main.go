@@ -55,7 +55,7 @@ func main() {
 	logger.Init()
 
 	// add an http handler to expose configurations, we cannot do this in the
-	// conf package.
+	// config package.
 	httpserver.HandleFunc("/debug/config", config.HandleList)
 
 	if config.CurrentNode().EnablePprof {
