@@ -17,8 +17,7 @@ import (
 type service struct {
 	raft *raft.Raft
 
-	mdLock   sync.Mutex
-	metadata *Data
+	md *Data // metadata
 
 	nodesLock sync.Mutex
 	nodes     map[string]*NodeInfo
@@ -30,7 +29,7 @@ type service struct {
 // newService creates a new meta service instance.
 func newService() *service {
 	svc := &service{}
-	svc.metadata = newData()
+	svc.md = newData()
 	svc.nodes = make(map[string]*NodeInfo)
 	svc.stop = make(chan struct{})
 	return svc
@@ -42,14 +41,6 @@ func (s *service) lockNodes() {
 
 func (s *service) unlockNodes() {
 	s.nodesLock.Unlock()
-}
-
-func (s *service) lockMetadata() {
-	s.mdLock.Lock()
-}
-
-func (s *service) unlockMetadata() {
-	s.mdLock.Unlock()
 }
 
 // isLeader returns whether the current node is the leader.

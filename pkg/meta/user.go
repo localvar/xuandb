@@ -16,8 +16,9 @@ import (
 
 // Errors for user operations.
 var (
-	ErrUserExists    = xerrors.New(http.StatusConflict, "user already exists")
-	ErrUserNotExists = xerrors.New(http.StatusNotFound, "user not exists")
+	ErrUserExists      = xerrors.New(http.StatusConflict, "user already exists")
+	ErrUserNotExists   = xerrors.New(http.StatusNotFound, "user does not exist")
+	ErrCannotDropAdmin = xerrors.New(http.StatusForbidden, "cannot drop admin user")
 )
 
 // raft operation names for users.
@@ -46,12 +47,15 @@ func registerUserHandlers() {
 type User struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
+	// the first user will be the administrator, and the 'admin' field is
+	// read-only for clients.
+	Admin bool `json:"admin"`
 }
 
 // handlers for the create user command.
 type createUserCommand struct {
 	baseCommand
-	User
+	*User
 }
 
 func applyCreateUser(l *raft.Log) any {
@@ -60,16 +64,15 @@ func applyCreateUser(l *raft.Log) any {
 		return err
 	}
 
-	s := svcInst
-	md := s.metadata
+	md := svcInst.md
 	key := strings.ToLower(cmd.Name)
 
-	s.lockMetadata()
-	defer s.unlockMetadata()
+	md.lock()
+	defer md.unlock()
 
-	u := md.Users[key]
-	if u == nil {
-		md.Users[key] = &cmd.User
+	if u := md.Users[key]; u == nil {
+		cmd.User.Admin = len(md.Users) == 0
+		md.Users[key] = cmd.User
 		return nil
 	}
 
@@ -77,22 +80,16 @@ func applyCreateUser(l *raft.Log) any {
 }
 
 func leaderCreateUser(u *User) error {
-	s := svcInst
-	md := s.metadata
-
-	s.lockMetadata()
-	u1 := md.Users[strings.ToLower(u.Name)]
-	s.unlockMetadata()
-	if u1 != nil {
+	if UserByName(u.Name) != nil {
 		slog.Debug("user already exists", slog.String("name", u.Name))
 		return ErrUserExists
 	}
 
 	cmd := createUserCommand{
 		baseCommand: baseCommand{Op: opCreateUser},
-		User:        *u,
+		User:        u,
 	}
-	err := s.raftApply(&cmd)
+	err := svcInst.raftApply(&cmd)
 	if err == nil {
 		slog.Info("user created", slog.String("name", u.Name))
 		return nil
@@ -103,10 +100,9 @@ func leaderCreateUser(u *User) error {
 }
 
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {
-	var u User
+	u := &User{}
 
-	err := json.NewDecoder(r.Body).Decode(&u)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(u); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -117,7 +113,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Debug("create user command received", slog.String("name", u.Name))
-	if err = leaderCreateUser(&u); err != nil {
+	if err := leaderCreateUser(u); err != nil {
 		se := err.(*xerrors.StatusError)
 		http.Error(w, se.Msg, se.StatusCode)
 		return
@@ -141,48 +137,38 @@ type dropUserCommand struct {
 }
 
 func applyDropUser(l *raft.Log) any {
-	var cmd dropUserCommand
-	if err := json.Unmarshal(l.Data, &cmd); err != nil {
+	cmd := dropUserCommand{}
+	if err := json.Unmarshal(l.Data, cmd); err != nil {
 		return err
 	}
 
-	s := svcInst
-	md := s.metadata
+	md := svcInst.md
 	key := strings.ToLower(cmd.Name)
 
-	s.lockMetadata()
-	defer s.unlockMetadata()
+	// we have checked that the user is not the admin in leaderDropUser, and we
+	// don't care if the user exists or not, so simply delete the user here.
+	md.lock()
+	delete(md.Users, key)
+	md.unlock()
 
-	u := md.Users[key]
-	if u != nil {
-		delete(md.Users, key)
-		return nil
-	}
-
-	return ErrUserNotExists
+	return nil
 }
 
 func leaderDropUser(name string) error {
-	s := svcInst
-	md := s.metadata
-	key := strings.ToLower(name)
-
-	// check if the user already exists for the 1st time.
-	s.lockMetadata()
-	u := md.Users[key]
-	s.unlockMetadata()
-
-	// treat the user does not exist as a successful operation.
-	if u == nil {
+	if u := UserByName(name); u == nil {
+		// treat the user does not exist as a successful operation.
 		slog.Debug("user does not exist", slog.String("name", name))
 		return nil
+	} else if u.Admin {
+		slog.Debug("cannot drop admin user", slog.String("name", name))
+		return ErrCannotDropAdmin
 	}
 
 	cmd := dropUserCommand{
 		baseCommand: baseCommand{Op: opDropUser},
 		Name:        name,
 	}
-	err := s.raftApply(&cmd)
+	err := svcInst.raftApply(&cmd)
 	if err == nil {
 		slog.Info("user dropped", slog.String("name", name))
 		return nil
@@ -225,7 +211,8 @@ func DropUser(name string) error {
 // handlers for the set password command.
 type setPasswordCommand struct {
 	baseCommand
-	User
+	Name     string `json:"name"`
+	Password string `json:"password"`
 }
 
 func applySetPassword(l *raft.Log) any {
@@ -234,16 +221,16 @@ func applySetPassword(l *raft.Log) any {
 		return err
 	}
 
-	s := svcInst
-	md := s.metadata
+	md := svcInst.md
 	key := strings.ToLower(cmd.Name)
 
-	s.lockMetadata()
-	defer s.unlockMetadata()
+	md.lock()
+	defer md.unlock()
 
-	u := md.Users[key]
-	if u != nil {
-		u.Password = cmd.Password
+	if u := md.Users[key]; u != nil {
+		u1 := *u
+		u1.Password = cmd.Password
+		md.Users[key] = &u1
 		return nil
 	}
 
@@ -251,23 +238,18 @@ func applySetPassword(l *raft.Log) any {
 }
 
 func leaderSetPassword(u *User) error {
-	s := svcInst
-	md := s.metadata
-
 	// check if the user exists
-	s.lockMetadata()
-	u1 := md.Users[strings.ToLower(u.Name)]
-	s.unlockMetadata()
-	if u1 == nil {
+	if UserByName(u.Name) == nil {
 		slog.Debug("user not exists", slog.String("name", u.Name))
 		return ErrUserNotExists
 	}
 
 	cmd := setPasswordCommand{
 		baseCommand: baseCommand{Op: opSetPassword},
-		User:        *u,
+		Name:        u.Name,
+		Password:    u.Password,
 	}
-	err := s.raftApply(&cmd)
+	err := svcInst.raftApply(&cmd)
 	if err == nil {
 		slog.Info("set password succeeded", slog.String("name", u.Name))
 		return nil
@@ -278,9 +260,9 @@ func leaderSetPassword(u *User) error {
 }
 
 func handleSetPassword(w http.ResponseWriter, r *http.Request) {
-	var u User
+	u := &User{}
 
-	err := json.NewDecoder(r.Body).Decode(&u)
+	err := json.NewDecoder(r.Body).Decode(u)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -292,7 +274,7 @@ func handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Debug("set password command received", slog.String("name", u.Name))
-	if err = leaderSetPassword(&u); err != nil {
+	if err = leaderSetPassword(u); err != nil {
 		se := err.(*xerrors.StatusError)
 		http.Error(w, se.Msg, se.StatusCode)
 		return
@@ -310,21 +292,38 @@ func SetPassword(name, password string) error {
 	return sendPutRequestToLeader("/meta/users", u)
 }
 
-// Users returns all users.
-func Users() []User {
-	s := svcInst
-	md := s.metadata
+// Users returns all users. The result is sorted by name.
+func Users() []*User {
+	md := svcInst.md
 
-	s.lockMetadata()
-	result := make([]User, 0, len(md.Users))
+	md.lock()
+	result := make([]*User, 0, len(md.Users))
 	for _, u := range md.Users {
-		result = append(result, *u)
+		result = append(result, u)
 	}
-	s.unlockMetadata()
+	md.unlock()
 
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
 
 	return result
+}
+
+// HashUser returns true if there is any user.
+func HashUser() bool {
+	md := svcInst.md
+	md.lock()
+	defer md.unlock()
+	return len(md.Users) > 0
+}
+
+// UserByName returns a user by name. It returns nil if the user does not exist.
+func UserByName(name string) *User {
+	md := svcInst.md
+	key := strings.ToLower(name)
+
+	md.lock()
+	defer md.unlock()
+	return md.Users[key]
 }

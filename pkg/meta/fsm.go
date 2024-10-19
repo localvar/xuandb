@@ -5,14 +5,26 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/hashicorp/raft"
 	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
 // Data is the meta data that managed by the meta service.
+//
+// We expect updates to the data is much less frequent than reads, so we
+// optimize for reads by making the objects in the data immutable, that is,
+// we never modify the objects in the data, instead, we create a new object
+// and replace the old one. On the other hand, readers should not modify the
+// returned objects as it may be shared by multiple readers in multiple
+// goroutines.
+//
+// The update operations are done by the dataApplyFuncs to make the code more
+// readable and maintainable.
 type Data struct {
-	Users map[string]*User
+	l     sync.Mutex       `json:"-"`
+	Users map[string]*User `json:"users"`
 }
 
 // newData creates a new Data.
@@ -26,12 +38,24 @@ func newData() *Data {
 func (d *Data) clone() *Data {
 	r := newData()
 
+	d.lock()
+	defer d.unlock()
+
 	for k, v := range d.Users {
-		u := *v
-		r.Users[k] = &u
+		r.Users[k] = v
 	}
 
 	return r
+}
+
+// lock locks the data.
+func (d *Data) lock() {
+	d.l.Lock()
+}
+
+// unlock unlocks the data.
+func (d *Data) unlock() {
+	d.l.Unlock()
 }
 
 // Persist implements the raft.FSMSnapshot interface.
@@ -138,11 +162,7 @@ func (s *service) Apply(l *raft.Log) any {
 
 // Snapshot implements the raft.FSM interface.
 func (s *service) Snapshot() (raft.FSMSnapshot, error) {
-	s.lockMetadata()
-	d := s.metadata.clone()
-	s.unlockMetadata()
-
-	return d, nil
+	return s.md.clone(), nil
 }
 
 // Restore implements the raft.FSM interface.
@@ -151,6 +171,6 @@ func (s *service) Restore(rc io.ReadCloser) error {
 	if err := json.NewDecoder(rc).Decode(d); err != nil {
 		return err
 	}
-	s.metadata = d
+	s.md = d
 	return nil
 }
