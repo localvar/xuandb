@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -310,14 +311,6 @@ func Users() []*User {
 	return result
 }
 
-// HashUser returns true if there is any user.
-func HashUser() bool {
-	md := svcInst.md
-	md.lock()
-	defer md.unlock()
-	return len(md.Users) > 0
-}
-
 // UserByName returns a user by name. It returns nil if the user does not exist.
 func UserByName(name string) *User {
 	md := svcInst.md
@@ -326,4 +319,53 @@ func UserByName(name string) *User {
 	md.lock()
 	defer md.unlock()
 	return md.Users[key]
+}
+
+// getUser returns a user by name, noUser is true if no user has been created.
+func getUser(name string) (u *User, noUser bool) {
+	name = strings.ToLower(name)
+	md := svcInst.md
+	md.lock()
+	u = md.Users[name]
+	noUser = len(md.Users) == 0
+	md.unlock()
+	return
+}
+
+// constantTimeEq compares two strings in constant time to prevent timing
+// attacks.
+func constantTimeEq(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// AuthForDebug wraps the input http.HandlerFunc to a new http.HandlerFunc which
+// authenticates the request for debug operations.
+func AuthForDebug(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name, pwd, ok := r.BasicAuth()
+
+		u, noUser := getUser(name)
+		if noUser {
+			handler(w, r)
+			return
+		}
+
+		if !ok {
+			http.Error(w, "basic auth required", http.StatusUnauthorized)
+			return
+		}
+
+		if u == nil || constantTimeEq(u.Password, pwd) {
+			http.Error(w, "invalid user or password", http.StatusUnauthorized)
+			return
+		}
+
+		// TODO: support roles.
+		if !u.Admin {
+			http.Error(w, "admin required", http.StatusForbidden)
+			return
+		}
+
+		handler(w, r)
+	}
 }

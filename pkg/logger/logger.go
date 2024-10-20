@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"github.com/localvar/xuandb/pkg/config"
-	"github.com/localvar/xuandb/pkg/httpserver"
 )
 
+// lvlVar is a slog.LevelVar that can be used to get/set the minimal log level.
+var lvlVar = &slog.LevelVar{}
+
 // Init initialize a logger according to the configuration and set it as the
-// slog.Default(). It also setup HTTP handlers to Get/Set the minimal log level.
+// slog.Default().
 func Init() {
 	lc := config.CurrentNode().Logger
 
-	lvlVar := &slog.LevelVar{}
 	lvlVar.Set(lc.Level)
-
 	opts := &slog.HandlerOptions{
 		AddSource: lc.AddSource,
 		Level:     lvlVar,
@@ -50,22 +50,23 @@ func Init() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	handleGetLevel := func(w http.ResponseWriter, r *http.Request) {
-		if text, err := lvlVar.MarshalText(); err == nil {
-			w.Write(text)
-		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	}
-	httpserver.HandleFunc("GET /debug/logger/level", handleGetLevel)
+}
 
-	handleSetLevel := func(w http.ResponseWriter, r *http.Request) {
-		val := r.FormValue("value")
-		if err := lvlVar.UnmarshalText([]byte(val)); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+// HandleGetLevel is an http handler that returns the current minimal log level.
+func HandleGetLevel(w http.ResponseWriter, r *http.Request) {
+	if text, err := lvlVar.MarshalText(); err == nil {
+		w.Write(text)
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-	httpserver.HandleFunc("POST /debug/logger/level", handleSetLevel)
+}
+
+// HandleSetLevel is an http handler that sets the minimal log level.
+func HandleSetLevel(w http.ResponseWriter, r *http.Request) {
+	val := r.FormValue("value")
+	if err := lvlVar.UnmarshalText([]byte(val)); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 }
 
 // lowLevelLog is the low-level logging function that wraps a slog logger, it

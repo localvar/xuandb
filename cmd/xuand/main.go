@@ -4,27 +4,18 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/localvar/xuandb/pkg/config"
+	"github.com/localvar/xuandb/pkg/debug"
 	"github.com/localvar/xuandb/pkg/httpserver"
 	"github.com/localvar/xuandb/pkg/logger"
 	"github.com/localvar/xuandb/pkg/meta"
 	"github.com/localvar/xuandb/pkg/query"
 	"github.com/localvar/xuandb/pkg/version"
 )
-
-// registerPprofHandlers registers the pprof handlers.
-func registerPprofHandlers() {
-	httpserver.HandleFunc("GET /debug/pprof/", pprof.Index)
-	httpserver.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	httpserver.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	httpserver.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	httpserver.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-}
 
 func main() {
 	var nodeID string
@@ -53,14 +44,7 @@ func main() {
 	}
 
 	logger.Init()
-
-	// add an http handler to expose configurations, we cannot do this in the
-	// config package.
-	httpserver.HandleFunc("/debug/config", config.HandleList)
-
-	if config.CurrentNode().EnablePprof {
-		registerPprofHandlers()
-	}
+	debug.Init()
 
 	httpserver.Start()
 	defer func() {
