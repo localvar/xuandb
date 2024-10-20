@@ -23,8 +23,8 @@ var (
 
 // raft operation names for databases.
 const (
-	opCreateDatabase = "CreateDatabase"
-	opDropDatabase   = "DropDatabase"
+	opCreateDatabase = "create-database"
+	opDropDatabase   = "drop-database"
 )
 
 // registerDatabaseHandlers registers handlers for database operations.

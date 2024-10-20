@@ -18,7 +18,7 @@ import (
 
 // raft operation names for nodes.
 const (
-	opUpdateNodeList = "UpdateNodeList"
+	opUpdateNodeList = "update-node-list"
 )
 
 // registerNodeHandlers registers handlers for node operations.

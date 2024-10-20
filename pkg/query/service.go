@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -23,9 +24,26 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Debug("query received", slog.String("query", q))
+	/*
+		if db := r.FormValue("db"); db != "" {
+			stmt.BindDatabase(db)
+		}
+	*/
 
-	err = stmt.Execute(w, r)
+	name, pwd, _ := r.BasicAuth()
+	if err := stmt.CheckPrivilege(name, pwd); err != nil {
+		se := err.(*xerrors.StatusError)
+		http.Error(w, se.Msg, se.StatusCode)
+		return
+	}
+
+	res, err := stmt.Execute()
 	if err == nil {
+		if res == nil {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			json.NewEncoder(w).Encode(res)
+		}
 		return
 	}
 

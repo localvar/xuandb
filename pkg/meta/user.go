@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -20,13 +21,17 @@ var (
 	ErrUserExists      = xerrors.New(http.StatusConflict, "user already exists")
 	ErrUserNotExists   = xerrors.New(http.StatusNotFound, "user does not exist")
 	ErrCannotDropAdmin = xerrors.New(http.StatusForbidden, "cannot drop admin user")
+
+	ErrAuthRequired           = xerrors.New(http.StatusUnauthorized, "authorization required")
+	ErrPasswordMismatch       = xerrors.New(http.StatusUnauthorized, "password mismatch or user not exists")
+	ErrInsufficientPrivileges = xerrors.New(http.StatusForbidden, "insufficient privileges")
 )
 
 // raft operation names for users.
 const (
-	opCreateUser  = "CreateUser"
-	opDropUser    = "DropUser"
-	opSetPassword = "SetPassword"
+	opCreateUser  = "create-user"
+	opDropUser    = "drop-user"
+	opSetPassword = "set-password"
 )
 
 // registerUserHandlers registers handlers for user operations.
@@ -44,13 +49,42 @@ func registerUserHandlers() {
 	httpserver.HandleFunc("DELETE /meta/users", handleDropUser)
 }
 
+// Privilege represents the privilege of a user.
+type Privilege uint
+
+const (
+	PrivilegeNone Privilege = 0
+	// PrivilegeDebug allows the user to perform debug operations, it can
+	// only be a global privilege and has no effect on databases.
+	PrivilegeDebug Privilege = 1
+	// PrivilegeRead allows the user to read data from a database.
+	PrivilegeRead Privilege = 2
+	// PrivilegeWrite allows the user to write data to a database.
+	PrivilegeWrite Privilege = 4
+	// PrivilegeMask is a mask that used to check if a privilege is valid.
+	PrivilegeMask Privilege = 7
+	// PrivilegeAdmin is a special privilege that has all privileges, including
+	// the privileges we may add in the future.
+	PrivilegeAdmin Privilege = math.MaxUint
+)
+
 // User represents a user.
 type User struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
-	// the first user will be the administrator, and the 'admin' field is
-	// read-only for clients.
-	Admin bool `json:"admin"`
+
+	// Root marks the first user created, which cannot be dropped, and
+	// always has admin privilege.
+	Root bool `json:"root"`
+
+	// Priv is the global privileges of a user, when checking if a user has
+	// the privilege to perform an operation on a database, this field is
+	// checked first, which means if the user has this privilege, he has this
+	// privilege on all databases.
+	Priv Privilege `json:"privilege"`
+
+	// DbPriv is the database privileges of a user.
+	DbPriv map[string]Privilege `json:"dbPriv"`
 }
 
 // handlers for the create user command.
@@ -72,7 +106,10 @@ func applyCreateUser(l *raft.Log) any {
 	defer md.unlock()
 
 	if u := md.Users[key]; u == nil {
-		cmd.User.Admin = len(md.Users) == 0
+		if len(md.Users) == 0 {
+			cmd.User.Root = true
+			cmd.User.Priv = PrivilegeAdmin
+		}
 		md.Users[key] = cmd.User
 		return nil
 	}
@@ -110,6 +147,11 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if u.Name == "" || u.Password == "" {
 		http.Error(w, "name and password are required", http.StatusBadRequest)
+		return
+	}
+
+	if (u.Priv != PrivilegeAdmin) && (u.Priv&^PrivilegeMask != 0) {
+		http.Error(w, "invalid privilege", http.StatusBadRequest)
 		return
 	}
 
@@ -160,8 +202,8 @@ func leaderDropUser(name string) error {
 		// treat the user does not exist as a successful operation.
 		slog.Debug("user does not exist", slog.String("name", name))
 		return nil
-	} else if u.Admin {
-		slog.Debug("cannot drop admin user", slog.String("name", name))
+	} else if u.Root {
+		slog.Debug("cannot drop root user", slog.String("name", name))
 		return ErrCannotDropAdmin
 	}
 
@@ -332,37 +374,59 @@ func getUser(name string) (u *User, noUser bool) {
 	return
 }
 
-// constantTimeEq compares two strings in constant time to prevent timing
-// attacks.
-func constantTimeEq(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+// RequiredPrivileges represents the required privileges of an operation.
+type RequiredPrivileges struct {
+	Global    Privilege
+	Databases map[string]Privilege
+}
+
+// CheckPrivilege checks if the user has the required privileges.
+func CheckPrivilege(name, pwd string, rp RequiredPrivileges) error {
+	u, noUser := getUser(name)
+	if noUser {
+		return nil
+	}
+
+	if len(name) == 0 {
+		return ErrAuthRequired
+	}
+
+	if u == nil {
+		return ErrPasswordMismatch
+	}
+
+	if subtle.ConstantTimeCompare([]byte(pwd), []byte(u.Password)) == 0 {
+		return ErrPasswordMismatch
+	}
+
+	if u.Priv == PrivilegeAdmin {
+		return nil
+	}
+
+	// don't use 'u.Priv&rp.Global != 0' because 'rp.Global' may be 0.
+	if u.Priv&rp.Global != rp.Global {
+		return ErrInsufficientPrivileges
+	}
+
+	for db, priv := range rp.Databases {
+		if (u.Priv|u.DbPriv[db])&priv != priv {
+			return ErrInsufficientPrivileges
+		}
+	}
+
+	return nil
 }
 
 // AuthForDebug wraps the input http.HandlerFunc to a new http.HandlerFunc which
 // authenticates the request for debug operations.
 func AuthForDebug(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, pwd, ok := r.BasicAuth()
+		name, pwd, _ := r.BasicAuth()
 
-		u, noUser := getUser(name)
-		if noUser {
-			handler(w, r)
-			return
-		}
-
-		if !ok {
-			http.Error(w, "basic auth required", http.StatusUnauthorized)
-			return
-		}
-
-		if u == nil || constantTimeEq(u.Password, pwd) {
-			http.Error(w, "invalid user or password", http.StatusUnauthorized)
-			return
-		}
-
-		// TODO: support roles.
-		if !u.Admin {
-			http.Error(w, "admin required", http.StatusForbidden)
+		rp := RequiredPrivileges{Global: PrivilegeDebug}
+		if err := CheckPrivilege(name, pwd, rp); err != nil {
+			se := err.(*xerrors.StatusError)
+			http.Error(w, se.Msg, se.StatusCode)
 			return
 		}
 
