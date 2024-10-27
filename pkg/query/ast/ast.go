@@ -5,7 +5,7 @@ import (
 )
 
 type Statement interface {
-	CheckPrivilege(name, pwd string) error
+	Auth(name, pwd string) error
 	Execute() (any, error)
 }
 
@@ -14,9 +14,9 @@ type Statement interface {
 type adminStatement struct {
 }
 
-func (stmt *adminStatement) CheckPrivilege(name, pwd string) error {
+func (stmt *adminStatement) Auth(name, pwd string) error {
 	rp := meta.RequiredPrivileges{Global: meta.PrivilegeAdmin}
-	return meta.CheckPrivilege(name, pwd, rp)
+	return meta.Auth(name, pwd, rp)
 }
 
 // readStatement represents a statement which requires the global read
@@ -24,9 +24,9 @@ func (stmt *adminStatement) CheckPrivilege(name, pwd string) error {
 type readStatement struct {
 }
 
-func (stmt *readStatement) CheckPrivilege(name, pwd string) error {
+func (stmt *readStatement) Auth(name, pwd string) error {
 	rp := meta.RequiredPrivileges{Global: meta.PrivilegeRead}
-	return meta.CheckPrivilege(name, pwd, rp)
+	return meta.Auth(name, pwd, rp)
 }
 
 // CreateUserStatement represents a command for creating a new user.
@@ -61,14 +61,14 @@ type SetPasswordStatement struct {
 	Password string
 }
 
-func (stmt *SetPasswordStatement) CheckPrivilege(name, pwd string) error {
+func (stmt *SetPasswordStatement) Auth(name, pwd string) error {
 	rp := meta.RequiredPrivileges{Global: meta.PrivilegeAdmin}
 	// A user can change his own password, in this case, we only need to call
-	// 'meta.CheckPrivilege' to check the password.
+	// 'meta.Auth' to check the password.
 	if name == stmt.Name {
 		rp.Global = meta.PrivilegeNone
 	}
-	return meta.CheckPrivilege(name, pwd, rp)
+	return meta.Auth(name, pwd, rp)
 }
 
 func (stmt *SetPasswordStatement) Execute() (any, error) {

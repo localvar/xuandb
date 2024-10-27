@@ -3,12 +3,15 @@ package meta
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/raft"
 	"github.com/localvar/xuandb/pkg/config"
@@ -18,9 +21,9 @@ import (
 
 // Errors for user operations.
 var (
-	ErrUserExists      = xerrors.New(http.StatusConflict, "user already exists")
-	ErrUserNotExists   = xerrors.New(http.StatusNotFound, "user does not exist")
-	ErrCannotDropAdmin = xerrors.New(http.StatusForbidden, "cannot drop admin user")
+	ErrUserExists    = xerrors.New(http.StatusConflict, "user already exists")
+	ErrUserNotExists = xerrors.New(http.StatusNotFound, "user does not exist")
+	ErrSystemUser    = xerrors.New(http.StatusForbidden, "user is a system user")
 
 	ErrAuthRequired           = xerrors.New(http.StatusUnauthorized, "authorization required")
 	ErrPasswordMismatch       = xerrors.New(http.StatusUnauthorized, "password mismatch or user not exists")
@@ -53,7 +56,9 @@ func registerUserHandlers() {
 type Privilege uint
 
 const (
+	// PrivilegeNone means no privilege.
 	PrivilegeNone Privilege = 0
+
 	// PrivilegeDebug allows the user to perform debug operations, it can
 	// only be a global privilege and has no effect on databases.
 	PrivilegeDebug Privilege = 1
@@ -63,19 +68,108 @@ const (
 	PrivilegeWrite Privilege = 4
 	// PrivilegeMask is a mask that used to check if a privilege is valid.
 	PrivilegeMask Privilege = 7
-	// PrivilegeAdmin is a special privilege that has all privileges, including
-	// the privileges we may add in the future.
-	PrivilegeAdmin Privilege = math.MaxUint
+
+	// PrivilegeAdmin is a special privilege that has all common privileges,
+	// including the privileges we may add in the future.
+	PrivilegeAdmin Privilege = math.MaxInt + 1
 )
+
+func (p *Privilege) parse(str string) error {
+	v := PrivilegeNone
+
+	for len(str) > 0 {
+		s := ""
+		if idx := strings.IndexByte(str, ','); idx >= 0 {
+			s, str = str[:idx], str[idx+1:]
+		} else {
+			s, str = str, ""
+		}
+
+		s = strings.ToUpper(strings.Trim(s, " \t"))
+		switch s {
+		case "", "NONE":
+			// nop
+		case "DEBUG":
+			v |= PrivilegeDebug
+		case "READ":
+			v |= PrivilegeRead
+		case "WRITE":
+			v |= PrivilegeWrite
+		case "ADMIN":
+			v |= PrivilegeAdmin
+		default:
+			return fmt.Errorf("invalid privilege: %s", s)
+		}
+	}
+
+	*p = v
+	return nil
+}
+
+// String returns the string representation of a privilege.
+func (p Privilege) String() string {
+	if p == PrivilegeNone {
+		return ""
+	}
+	if p == PrivilegeAdmin {
+		return "ADMIN"
+	}
+
+	s := ""
+	if p&PrivilegeDebug == PrivilegeDebug {
+		s = "DEBUG"
+	}
+	if p&PrivilegeRead == PrivilegeRead {
+		if s != "" {
+			s += ",READ"
+		} else {
+			s = "READ"
+		}
+	}
+	if p&PrivilegeWrite == PrivilegeWrite {
+		if s != "" {
+			s += ",WRITE"
+		} else {
+			s = "WRITE"
+		}
+	}
+
+	return s
+}
+
+// MarshalJSON implements [encoding/json.Marshaler]
+func (p Privilege) MarshalJSON() ([]byte, error) {
+	return strconv.AppendQuote(nil, p.String()), nil
+}
+
+// UnmarshalJSON implements [encoding/json.Unmarshaler]
+func (p *Privilege) UnmarshalJSON(data []byte) error {
+	s, err := strconv.Unquote(string(data))
+	if err != nil {
+		return err
+	}
+	return p.parse(s)
+}
+
+// MarshalText implements [encoding.TextMarshaler]
+func (p Privilege) MarshalText() ([]byte, error) {
+	return []byte(p.String()), nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler].
+func (p *Privilege) UnmarshalText(data []byte) error {
+	return p.parse(string(data))
+}
 
 // User represents a user.
 type User struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
+	Name      string    `json:"name"`
+	Password  string    `json:"password"`
+	CreatedAt time.Time `json:"createdAt"`
 
-	// Root marks the first user created, which cannot be dropped, and
-	// always has admin privilege.
-	Root bool `json:"root"`
+	// System marks a system user, system users cannot be dropped, and their
+	// privileges cannot be changed. The first user created is a system user.
+	System bool `json:"system"`
 
 	// Priv is the global privileges of a user, when checking if a user has
 	// the privilege to perform an operation on a database, this field is
@@ -94,8 +188,8 @@ type createUserCommand struct {
 }
 
 func applyCreateUser(l *raft.Log) any {
-	var cmd createUserCommand
-	if err := json.Unmarshal(l.Data, &cmd); err != nil {
+	cmd := &createUserCommand{}
+	if err := json.Unmarshal(l.Data, cmd); err != nil {
 		return err
 	}
 
@@ -107,8 +201,9 @@ func applyCreateUser(l *raft.Log) any {
 
 	if u := md.Users[key]; u == nil {
 		if len(md.Users) == 0 {
-			cmd.User.Root = true
 			cmd.User.Priv = PrivilegeAdmin
+			cmd.User.System = true
+			slog.Info("system admin created", slog.String("name", cmd.User.Name))
 		}
 		md.Users[key] = cmd.User
 		return nil
@@ -123,6 +218,7 @@ func leaderCreateUser(u *User) error {
 		return ErrUserExists
 	}
 
+	u.CreatedAt = time.Now()
 	cmd := createUserCommand{
 		baseCommand: baseCommand{Op: opCreateUser},
 		User:        u,
@@ -167,6 +263,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser creates a user.
 func CreateUser(u *User) error {
+	u.System = false // clear the system bit
 	if svcInst.isLeader() {
 		return leaderCreateUser(u)
 	}
@@ -180,7 +277,7 @@ type dropUserCommand struct {
 }
 
 func applyDropUser(l *raft.Log) any {
-	cmd := dropUserCommand{}
+	cmd := &dropUserCommand{}
 	if err := json.Unmarshal(l.Data, cmd); err != nil {
 		return err
 	}
@@ -202,9 +299,9 @@ func leaderDropUser(name string) error {
 		// treat the user does not exist as a successful operation.
 		slog.Debug("user does not exist", slog.String("name", name))
 		return nil
-	} else if u.Root {
-		slog.Debug("cannot drop root user", slog.String("name", name))
-		return ErrCannotDropAdmin
+	} else if u.System {
+		slog.Debug("cannot drop system user", slog.String("name", name))
+		return ErrSystemUser
 	}
 
 	cmd := dropUserCommand{
@@ -259,8 +356,8 @@ type setPasswordCommand struct {
 }
 
 func applySetPassword(l *raft.Log) any {
-	var cmd setPasswordCommand
-	if err := json.Unmarshal(l.Data, &cmd); err != nil {
+	cmd := &setPasswordCommand{}
+	if err := json.Unmarshal(l.Data, cmd); err != nil {
 		return err
 	}
 
@@ -287,12 +384,12 @@ func leaderSetPassword(u *User) error {
 		return ErrUserNotExists
 	}
 
-	cmd := setPasswordCommand{
+	cmd := &setPasswordCommand{
 		baseCommand: baseCommand{Op: opSetPassword},
 		Name:        u.Name,
 		Password:    u.Password,
 	}
-	err := svcInst.raftApply(&cmd)
+	err := svcInst.raftApply(cmd)
 	if err == nil {
 		slog.Info("set password succeeded", slog.String("name", u.Name))
 		return nil
@@ -380,8 +477,8 @@ type RequiredPrivileges struct {
 	Databases map[string]Privilege
 }
 
-// CheckPrivilege checks if the user has the required privileges.
-func CheckPrivilege(name, pwd string, rp RequiredPrivileges) error {
+// Auth does authentication and authorization.
+func Auth(name, pwd string, rp RequiredPrivileges) error {
 	u, noUser := getUser(name)
 	if noUser {
 		return nil
@@ -415,21 +512,4 @@ func CheckPrivilege(name, pwd string, rp RequiredPrivileges) error {
 	}
 
 	return nil
-}
-
-// AuthForDebug wraps the input http.HandlerFunc to a new http.HandlerFunc which
-// authenticates the request for debug operations.
-func AuthForDebug(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		name, pwd, _ := r.BasicAuth()
-
-		rp := RequiredPrivileges{Global: PrivilegeDebug}
-		if err := CheckPrivilege(name, pwd, rp); err != nil {
-			se := err.(*xerrors.StatusError)
-			http.Error(w, se.Msg, se.StatusCode)
-			return
-		}
-
-		handler(w, r)
-	}
 }

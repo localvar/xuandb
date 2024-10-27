@@ -60,7 +60,7 @@ func (d *Data) unlock() {
 	d.l.Unlock()
 }
 
-// Persist implements the raft.FSMSnapshot interface.
+// Persist implements [raft.FSMSnapshot]
 func (d *Data) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
 		// Encode data.
@@ -85,7 +85,7 @@ func (d *Data) Persist(sink raft.SnapshotSink) error {
 	return err
 }
 
-// Release implements the raft.FSMSnapshot interface.
+// Release implements [raft.FSMSnapshot]
 func (d *Data) Release() {
 }
 
@@ -143,7 +143,7 @@ func (s *service) raftApply(v any) error {
 	}
 }
 
-// Apply implements the raft.FSM interface.
+// Apply implements [raft.FSM]
 func (s *service) Apply(l *raft.Log) any {
 	var cmd baseCommand
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
@@ -162,12 +162,12 @@ func (s *service) Apply(l *raft.Log) any {
 	return fn(l)
 }
 
-// Snapshot implements the raft.FSM interface.
+// Snapshot implements [raft.FSM]
 func (s *service) Snapshot() (raft.FSMSnapshot, error) {
 	return s.md.clone(), nil
 }
 
-// Restore implements the raft.FSM interface.
+// Restore implements [raft.FSM]
 func (s *service) Restore(rc io.ReadCloser) error {
 	d := newData()
 	if err := json.NewDecoder(rc).Decode(d); err != nil {

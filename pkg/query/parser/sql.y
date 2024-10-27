@@ -26,6 +26,7 @@ import "github.com/localvar/xuandb/pkg/query/ast"
        USER   DATABASE   NODE   CLUSTER   VOTER   NONVOTER
        AS   AT   BY   FOR   IN   ON   WHERE   WITH
        GROUP   LIMIT   OFFSET   JOIN   BETWEEN   DURATION   PASSWORD
+       PRIVILEGE
 
 // comments
 %token<str>    COMMENT
@@ -133,6 +134,15 @@ CREATE_USER_STATEMENT:
     CREATE USER IDENT WITH PASSWORD VAL_STR
     {
         $$ = &ast.CreateUserStatement{User: meta.User{Name: $3, Password: $6}}
+    }
+    | CREATE USER IDENT WITH PASSWORD VAL_STR WITH IDENT PRIVILEGE
+    {
+        stmt := &ast.CreateUserStatement{User: meta.User{Name: $3, Password: $6}}
+        if err := stmt.User.Priv.UnmarshalText([]byte($8)); err != nil {
+            yylex.Error(err.Error())
+            goto ret1
+        }
+        $$ = stmt
     }
 
 DROP_USER_STATEMENT:

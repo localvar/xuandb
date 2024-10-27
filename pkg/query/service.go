@@ -31,7 +31,7 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 	*/
 
 	name, pwd, _ := r.BasicAuth()
-	if err := stmt.CheckPrivilege(name, pwd); err != nil {
+	if err := stmt.Auth(name, pwd); err != nil {
 		se := err.(*xerrors.StatusError)
 		http.Error(w, se.Msg, se.StatusCode)
 		return
