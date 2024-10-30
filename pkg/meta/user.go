@@ -111,6 +111,7 @@ func (p Privilege) String() string {
 	if p == PrivilegeNone {
 		return ""
 	}
+
 	if p == PrivilegeAdmin {
 		return "ADMIN"
 	}
@@ -263,7 +264,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser creates a user.
 func CreateUser(u *User) error {
-	u.System = false // clear the system bit
+	u.System = false // clear the system flag
 	if svcInst.isLeader() {
 		return leaderCreateUser(u)
 	}

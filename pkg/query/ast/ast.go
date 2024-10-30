@@ -1,12 +1,42 @@
 package ast
 
 import (
+	"time"
+
 	"github.com/localvar/xuandb/pkg/meta"
 )
 
+type FieldValueType int
+
+const (
+	FieldValueTypeNil FieldValueType = iota
+	FieldValueTypeTime
+	FieldValueTypeDuration
+	FieldValueTypeBool
+	FieldValueTypeInt
+	FieldValueTypeFloat
+	FieldValueTypeString
+)
+
+type FieldValue struct {
+	Type     FieldValueType
+	Time     time.Time
+	Duration time.Duration
+	Bool     bool
+	Int      int64
+	Float    float64
+	String   string
+}
+
+type QueryResultWriter interface {
+	SetError(error)
+	SetColumns(...string)
+	AddRow(...FieldValue) error
+}
+
 type Statement interface {
 	Auth(name, pwd string) error
-	Execute() (any, error)
+	Execute(w QueryResultWriter) error
 }
 
 // adminStatement represents a statement which requires the global admin
@@ -35,11 +65,8 @@ type CreateUserStatement struct {
 	meta.User
 }
 
-func (stmt *CreateUserStatement) Execute() (any, error) {
-	if err := meta.CreateUser(&stmt.User); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *CreateUserStatement) Execute(qrw QueryResultWriter) error {
+	return meta.CreateUser(&stmt.User)
 }
 
 // DropUserStatement represents a command for dropping a user.
@@ -48,11 +75,8 @@ type DropUserStatement struct {
 	Name string
 }
 
-func (stmt *DropUserStatement) Execute() (any, error) {
-	if err := meta.DropUser(stmt.Name); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *DropUserStatement) Execute(qrw QueryResultWriter) error {
+	return meta.DropUser(stmt.Name)
 }
 
 // SetPasswordStatement represents a command for setting a user's password.
@@ -71,11 +95,8 @@ func (stmt *SetPasswordStatement) Auth(name, pwd string) error {
 	return meta.Auth(name, pwd, rp)
 }
 
-func (stmt *SetPasswordStatement) Execute() (any, error) {
-	if err := meta.SetPassword(stmt.Name, stmt.Password); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *SetPasswordStatement) Execute(qrw QueryResultWriter) error {
+	return meta.SetPassword(stmt.Name, stmt.Password)
 }
 
 // ShowUserStatement represents a command for showing all users.
@@ -83,8 +104,19 @@ type ShowUserStatement struct {
 	readStatement
 }
 
-func (stmt *ShowUserStatement) Execute() (any, error) {
-	return meta.Users(), nil
+func (stmt *ShowUserStatement) Execute(qrw QueryResultWriter) error {
+	qrw.SetColumns("name", "isSystem", "privileges")
+	for _, u := range meta.Users() {
+		err := qrw.AddRow(
+			FieldValue{Type: FieldValueTypeString, String: u.Name},
+			FieldValue{Type: FieldValueTypeBool, Bool: u.System},
+			FieldValue{Type: FieldValueTypeString, String: u.Priv.String()},
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // JoinNodeStatement represents a command for adding a new node to the cluster.
@@ -95,11 +127,8 @@ type JoinNodeStatement struct {
 	Voter bool
 }
 
-func (stmt *JoinNodeStatement) Execute() (any, error) {
-	if err := meta.AddNode(stmt.ID, stmt.Addr, stmt.Voter); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *JoinNodeStatement) Execute(qrw QueryResultWriter) error {
+	return meta.AddNode(stmt.ID, stmt.Addr, stmt.Voter)
 }
 
 // DropNodeStatement represents a command for removing a node from the cluster.
@@ -108,11 +137,8 @@ type DropNodeStatement struct {
 	ID string
 }
 
-func (stmt *DropNodeStatement) Execute() (any, error) {
-	if err := meta.DropNode(stmt.ID); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *DropNodeStatement) Execute(qrw QueryResultWriter) error {
+	return meta.DropNode(stmt.ID)
 }
 
 // ShowNodeStatement represents a command for showing all nodes in the cluster.
@@ -120,8 +146,22 @@ type ShowNodeStatement struct {
 	readStatement
 }
 
-func (stmt *ShowNodeStatement) Execute() (any, error) {
-	return meta.NodeStatuses(), nil
+func (stmt *ShowNodeStatement) Execute(qrw QueryResultWriter) error {
+	qrw.SetColumns("id", "addr", "role", "heartbeatTime", "isLeader", "state")
+	for _, n := range meta.NodeStatuses() {
+		err := qrw.AddRow(
+			FieldValue{Type: FieldValueTypeString, String: n.ID},
+			FieldValue{Type: FieldValueTypeString, String: n.Addr},
+			FieldValue{Type: FieldValueTypeString, String: n.Role.String()},
+			FieldValue{Type: FieldValueTypeTime, Time: n.LastHeartbeatTime},
+			FieldValue{Type: FieldValueTypeBool, Bool: n.Leader},
+			FieldValue{Type: FieldValueTypeString, String: n.State},
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CreateDatabaseStatement represents a command for creating a new database.
@@ -130,11 +170,8 @@ type CreateDatabaseStatement struct {
 	meta.Database
 }
 
-func (stmt *CreateDatabaseStatement) Execute() (any, error) {
-	if err := meta.CreateDatabase(&stmt.Database); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *CreateDatabaseStatement) Execute(qrw QueryResultWriter) error {
+	return meta.CreateDatabase(&stmt.Database)
 }
 
 // DropDatabaseStatement represents a command for dropping a database.
@@ -143,11 +180,8 @@ type DropDatabaseStatement struct {
 	Name string
 }
 
-func (stmt *DropDatabaseStatement) Execute() (any, error) {
-	if err := meta.DropDatabase(stmt.Name); err != nil {
-		return nil, err
-	}
-	return nil, nil
+func (stmt *DropDatabaseStatement) Execute(qrw QueryResultWriter) error {
+	return meta.DropDatabase(stmt.Name)
 }
 
 // ShowDatabaseStatement represents a command for showing all databases.
@@ -155,8 +189,18 @@ type ShowDatabaseStatement struct {
 	readStatement
 }
 
-func (stmt *ShowDatabaseStatement) Execute() (any, error) {
-	return meta.Databases(), nil
+func (stmt *ShowDatabaseStatement) Execute(qrw QueryResultWriter) error {
+	qrw.SetColumns("name", "duration")
+	for _, db := range meta.Databases() {
+		err := qrw.AddRow(
+			FieldValue{Type: FieldValueTypeString, String: db.Name},
+			FieldValue{Type: FieldValueTypeDuration, Duration: db.Duration},
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type Expr interface {
