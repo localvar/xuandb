@@ -20,9 +20,20 @@ cluster-name = ""
 	# is missing, the build-in default is used.
 	id = "#default#"
 
-	# `http-addr` is the address for the HTTP service, its format is
-	# "host:port". This configuration must be specified at the concrete nodes,
-	# the value specified at the default node will be ignored.
+	# `domain-name` is the domain name that points to this node. It is mainly
+	# used for containerized deployment, so that other nodes can communicate
+	# with this node, because IP address may change after the container restart.
+	#
+	# This configuration is optional, the default value is an empty string.
+	# 
+	# This configuration must be specified at the real nodes, the value
+	# specified at the default node will be ignored.
+	domain-name = ""
+
+	# `http-addr` is the address for the HTTP service, its format is "ip:port".
+	# 'ip' is only allowed to be "0.0.0.0" or "[::]" in the default node, this
+	# is useful when nodes are running on different hosts. If some of the nodes
+	# run on a same host, then 'http-addr' must be confiured on the real nodes.
 	http-addr = ""
 
 	# `enable-pprof` controls whether to enable the pprof service. The pprof
@@ -51,9 +62,10 @@ cluster-name = ""
 		raft-voter = false    # *false | true
 
 		# `raft-addr` is the address for the raft internal communication, its
-		# format is "host:port". This configuration must be specified at the
-		# concrete nodes, the value specified at the default node will be
-		# ignored.
+		# format is "ip:port". 'ip' is only allowed to be "0.0.0.0" or "[::]" in
+		# the default node, this is useful when nodes are running on different
+		# hosts. If some of the nodes run on a same host, then 'raft-addr' must
+		# be confiured on the real nodes.
 		raft-addr = ""
 
 		# `raft-store` is the storage type for raft log store and stable store.

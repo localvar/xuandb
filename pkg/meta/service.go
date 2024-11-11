@@ -135,9 +135,10 @@ func (s *service) joinOrBootstrap() {
 	// try join first, but collect nodes info for bootstrap at the same time.
 	svrs := make([]raft.Server, 0, len(config.Nodes()))
 	for _, nc := range config.Nodes() {
+		addr := nc.ToExternalAddress(nc.Meta.RaftAddr)
 		svr := raft.Server{
 			ID:      raft.ServerID(nc.ID),
-			Address: raft.ServerAddress(nc.Meta.RaftAddr),
+			Address: raft.ServerAddress(addr),
 		}
 		if !nc.Meta.RaftVoter {
 			svr.Suffrage = raft.Nonvoter
@@ -148,7 +149,8 @@ func (s *service) joinOrBootstrap() {
 			continue
 		}
 
-		if join(nc.HTTPAddr) == nil {
+		addr = nc.ToExternalAddress(nc.HTTPAddr)
+		if join(addr) == nil {
 			return
 		}
 	}

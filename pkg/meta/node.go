@@ -45,11 +45,12 @@ type joinRequest struct {
 
 // join joins the current node to the raft cluster via addr.
 func join(addr string) error {
-	mc := config.CurrentNode().Meta
+	nc := config.CurrentNode()
+	mc := nc.Meta
 	jr, _ := json.Marshal(&joinRequest{
 		ClusterName: config.ClusterName(),
 		ID:          config.NodeID(),
-		Addr:        mc.RaftAddr,
+		Addr:        nc.ToExternalAddress(mc.RaftAddr),
 		Voter:       mc.RaftVoter,
 	})
 
@@ -253,7 +254,7 @@ type NodeInfo struct {
 func (ni *NodeInfo) init() {
 	nc := config.CurrentNode()
 	ni.ID = nc.ID
-	ni.Addr = nc.HTTPAddr
+	ni.Addr = nc.ToExternalAddress(nc.HTTPAddr)
 
 	if nc.Meta.RaftVoter {
 		ni.Role |= NodeRoleMeta

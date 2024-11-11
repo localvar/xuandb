@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -108,11 +109,23 @@ var dfltMetaCfg = &MetaConfig{
 func (mc *MetaConfig) updateDefault(hasKey hasKeyFunc) error {
 	dflt := dfltMetaCfg
 
-	if hasKey("raft-addr") {
+	if hasKey("raft-voter") {
 		dflt.RaftVoter = mc.RaftVoter
 	}
 
-	// skip 'RaftAddr' as it should not have a default value.
+	if mc.RaftAddr != "" {
+		ap, err := netip.ParseAddrPort(mc.RaftAddr)
+		if err != nil {
+			return err
+		}
+		if !ap.Addr().IsUnspecified() {
+			return errors.New("IP of 'raft-addr' of the default node can only be '0.0.0.0' or '[::]'")
+		}
+		if ap.Port() == 0 {
+			return errors.New("port of 'raft-addr' cannot be 0")
+		}
+		dflt.RaftAddr = mc.RaftAddr
+	}
 
 	switch strings.ToLower(mc.RaftStore) {
 	case "inmem", "memory":
@@ -155,9 +168,14 @@ func (mc *MetaConfig) tidy(hasKey hasKeyFunc) error {
 	}
 
 	if mc.RaftAddr == "" {
+		mc.RaftAddr = dflt.RaftAddr
+	}
+	if mc.RaftAddr == "" {
 		return fmt.Errorf("'raft-addr' is required")
-	} else if _, err := netip.ParseAddrPort(mc.RaftAddr); err != nil {
+	} else if ap, err := netip.ParseAddrPort(mc.RaftAddr); err != nil {
 		return err
+	} else if ap.Port() == 0 {
+		return errors.New("port of 'raft-addr' cannot be 0")
 	}
 
 	if !mc.RaftVoter {
@@ -260,6 +278,7 @@ func (qc *QueryConfig) tidy(hasKey hasKeyFunc) error {
 // NodeConfig contains configuration for a node.
 type NodeConfig struct {
 	ID          string        `toml:"id" json:"id"`
+	DomainName  string        `toml:"domain-name" json:"domainName"`
 	HTTPAddr    string        `toml:"http-addr" json:"httpAddr"`
 	EnablePprof bool          `toml:"enable-pprof" json:"enablePprof"`
 	Logger      *LoggerConfig `toml:"logger,omitempty" json:"logger,omitempty"`
@@ -276,12 +295,42 @@ var dfltNodeCfg = &NodeConfig{
 	Query:  dfltQueryCfg,
 }
 
+// ToExternalAddress converts an internal address to an external address.
+func (nc *NodeConfig) ToExternalAddress(addr string) string {
+	if nc.DomainName == "" {
+		return addr
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// This should not happen because this function is designed only for
+		// 'nc.HTTPAddr' and 'nc.Meta.RaftAddr'.
+		panic(err)
+	}
+
+	return net.JoinHostPort(nc.DomainName, port)
+}
+
 // updateDefault updates the default configuration with the values from the
 // current configuration.
 func (nc *NodeConfig) updateDefault(hasKey hasKeyFunc) error {
 	dflt := dfltNodeCfg
 
-	// skip 'ID' and 'HTTPAddr' as they should not have default values.
+	// skip 'ID' and 'DomainName' as they should not have default values.
+
+	if nc.HTTPAddr != "" {
+		ap, err := netip.ParseAddrPort(nc.HTTPAddr)
+		if err != nil {
+			return err
+		}
+		if !ap.Addr().IsUnspecified() {
+			return errors.New("IP of 'http-addr' of the default node can only be '0.0.0.0' or '[::]'")
+		}
+		if ap.Port() == 0 {
+			return errors.New("port of 'http-addr' cannot be 0")
+		}
+		dflt.HTTPAddr = nc.HTTPAddr
+	}
 
 	if hasKey("enable-pprof") {
 		dflt.EnablePprof = nc.EnablePprof
@@ -328,9 +377,14 @@ func (nc *NodeConfig) tidy(hasKey hasKeyFunc) error {
 	}
 
 	if nc.HTTPAddr == "" {
+		nc.HTTPAddr = dflt.HTTPAddr
+	}
+	if nc.HTTPAddr == "" {
 		return fmt.Errorf("'http-addr' is required for node '%s'", nc.ID)
-	} else if _, err := netip.ParseAddrPort(nc.HTTPAddr); err != nil {
+	} else if ap, err := netip.ParseAddrPort(nc.HTTPAddr); err != nil {
 		return err
+	} else if ap.Port() == 0 {
+		return errors.New("port of 'http-addr' cannot be 0")
 	}
 
 	if !hasKey("enable-pprof") {
