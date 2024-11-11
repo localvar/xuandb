@@ -17,10 +17,10 @@ var (
 
 // Start starts the http server.
 func Start() {
-	go func() {
-		svr.Addr = config.CurrentNode().HTTPAddr
-		svr.Handler = mux
+	svr.Addr = config.CurrentNode().HTTPAddr
+	svr.Handler = mux
 
+	go func() {
 		err := svr.ListenAndServe()
 		if err == nil || err == http.ErrServerClosed {
 			return
