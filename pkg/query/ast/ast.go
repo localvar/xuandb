@@ -1,42 +1,18 @@
 package ast
 
 import (
-	"time"
-
 	"github.com/localvar/xuandb/pkg/meta"
 )
 
-type FieldValueType int
-
-const (
-	FieldValueTypeNil FieldValueType = iota
-	FieldValueTypeTime
-	FieldValueTypeDuration
-	FieldValueTypeBool
-	FieldValueTypeInt
-	FieldValueTypeFloat
-	FieldValueTypeString
-)
-
-type FieldValue struct {
-	Type     FieldValueType
-	Time     time.Time
-	Duration time.Duration
-	Bool     bool
-	Int      int64
-	Float    float64
-	String   string
-}
-
-type QueryResultWriter interface {
+type ResultSet interface {
 	SetError(error)
 	SetColumns(...string)
-	AddRow(...FieldValue) error
+	AddRow(...any) error
 }
 
 type Statement interface {
 	Auth(name, pwd string) error
-	Execute(w QueryResultWriter) error
+	Execute(rs ResultSet) error
 }
 
 // adminStatement represents a statement which requires the global admin
@@ -65,7 +41,7 @@ type CreateUserStatement struct {
 	meta.User
 }
 
-func (stmt *CreateUserStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *CreateUserStatement) Execute(rs ResultSet) error {
 	return meta.CreateUser(&stmt.User)
 }
 
@@ -75,7 +51,7 @@ type DropUserStatement struct {
 	Name string
 }
 
-func (stmt *DropUserStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *DropUserStatement) Execute(rs ResultSet) error {
 	return meta.DropUser(stmt.Name)
 }
 
@@ -95,7 +71,7 @@ func (stmt *SetPasswordStatement) Auth(name, pwd string) error {
 	return meta.Auth(name, pwd, rp)
 }
 
-func (stmt *SetPasswordStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *SetPasswordStatement) Execute(rs ResultSet) error {
 	return meta.SetPassword(stmt.Name, stmt.Password)
 }
 
@@ -104,14 +80,10 @@ type ShowUserStatement struct {
 	readStatement
 }
 
-func (stmt *ShowUserStatement) Execute(qrw QueryResultWriter) error {
-	qrw.SetColumns("name", "isSystem", "privileges")
+func (stmt *ShowUserStatement) Execute(rs ResultSet) error {
+	rs.SetColumns("name", "isSystem", "privileges")
 	for _, u := range meta.Users() {
-		err := qrw.AddRow(
-			FieldValue{Type: FieldValueTypeString, String: u.Name},
-			FieldValue{Type: FieldValueTypeBool, Bool: u.System},
-			FieldValue{Type: FieldValueTypeString, String: u.Priv.String()},
-		)
+		err := rs.AddRow(u.Name, u.System, u.Priv.String())
 		if err != nil {
 			return err
 		}
@@ -127,7 +99,7 @@ type JoinNodeStatement struct {
 	Voter bool
 }
 
-func (stmt *JoinNodeStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *JoinNodeStatement) Execute(rs ResultSet) error {
 	return meta.AddNode(stmt.ID, stmt.Addr, stmt.Voter)
 }
 
@@ -137,7 +109,7 @@ type DropNodeStatement struct {
 	ID string
 }
 
-func (stmt *DropNodeStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *DropNodeStatement) Execute(rs ResultSet) error {
 	return meta.DropNode(stmt.ID)
 }
 
@@ -146,16 +118,16 @@ type ShowNodeStatement struct {
 	readStatement
 }
 
-func (stmt *ShowNodeStatement) Execute(qrw QueryResultWriter) error {
-	qrw.SetColumns("id", "addr", "role", "heartbeatTime", "isLeader", "state")
+func (stmt *ShowNodeStatement) Execute(rs ResultSet) error {
+	rs.SetColumns("id", "addr", "role", "heartbeatTime", "isLeader", "state")
 	for _, n := range meta.NodeStatuses() {
-		err := qrw.AddRow(
-			FieldValue{Type: FieldValueTypeString, String: n.ID},
-			FieldValue{Type: FieldValueTypeString, String: n.Addr},
-			FieldValue{Type: FieldValueTypeString, String: n.Role.String()},
-			FieldValue{Type: FieldValueTypeTime, Time: n.LastHeartbeatTime},
-			FieldValue{Type: FieldValueTypeBool, Bool: n.Leader},
-			FieldValue{Type: FieldValueTypeString, String: n.State},
+		err := rs.AddRow(
+			n.ID,
+			n.Addr,
+			n.Role.String(),
+			n.LastHeartbeatTime,
+			n.Leader,
+			n.State,
 		)
 		if err != nil {
 			return err
@@ -170,7 +142,7 @@ type CreateDatabaseStatement struct {
 	meta.Database
 }
 
-func (stmt *CreateDatabaseStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *CreateDatabaseStatement) Execute(rs ResultSet) error {
 	return meta.CreateDatabase(&stmt.Database)
 }
 
@@ -180,7 +152,7 @@ type DropDatabaseStatement struct {
 	Name string
 }
 
-func (stmt *DropDatabaseStatement) Execute(qrw QueryResultWriter) error {
+func (stmt *DropDatabaseStatement) Execute(rs ResultSet) error {
 	return meta.DropDatabase(stmt.Name)
 }
 
@@ -189,13 +161,10 @@ type ShowDatabaseStatement struct {
 	readStatement
 }
 
-func (stmt *ShowDatabaseStatement) Execute(qrw QueryResultWriter) error {
-	qrw.SetColumns("name", "duration")
+func (stmt *ShowDatabaseStatement) Execute(rs ResultSet) error {
+	rs.SetColumns("name", "duration")
 	for _, db := range meta.Databases() {
-		err := qrw.AddRow(
-			FieldValue{Type: FieldValueTypeString, String: db.Name},
-			FieldValue{Type: FieldValueTypeDuration, Duration: db.Duration},
-		)
+		err := rs.AddRow(db.Name, db.Duration)
 		if err != nil {
 			return err
 		}

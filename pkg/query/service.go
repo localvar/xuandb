@@ -1,135 +1,178 @@
 package query
 
 import (
+	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/localvar/xuandb/pkg/httpserver"
-	"github.com/localvar/xuandb/pkg/query/ast"
 	"github.com/localvar/xuandb/pkg/query/parser"
 	"github.com/localvar/xuandb/pkg/xerrors"
 )
 
-type queryResultWriter struct {
-	w        http.ResponseWriter
-	err      error
-	columns  []string
-	numRow   int
-	numValue int
+// result set layout:
+//
+//	{
+//	  "columns": ["col1", "col2", ...],
+//	  "values": [ [val1, val2, ...],    ... ],
+//	}
+//
+// TODO: this is a temporary implmentation which will be refactored later.
+// the buffer size should be limited and data should be written to temporary
+// file when exceeds the limit.
+type resultSetWriter struct {
+	buf     bytes.Buffer
+	err     error
+	columns []string
+	numRow  int
 }
 
-func (qrw *queryResultWriter) SetError(err error) {
-	qrw.err = err
+func (rsw *resultSetWriter) SetError(err error) {
+	if rsw.err == nil {
+		rsw.err = err
+	}
 }
 
-func (qrw *queryResultWriter) SetColumns(columns ...string) {
-	qrw.columns = columns
-}
-
-func (qrw *queryResultWriter) AddRow(vals ...ast.FieldValue) error {
-	if qrw.err != nil {
-		return qrw.err
+func (rsw *resultSetWriter) SetColumns(columns ...string) {
+	if rsw.err != nil {
+		return
 	}
 
-	if qrw.numRow == 0 {
-		_, err := qrw.w.Write([]byte(`{"columns":[`))
-		if err != nil {
-			qrw.err = err
-			return err
-		}
+	if rsw.columns != nil {
+		panic("columns has already been set.")
+	}
 
-		for i, c := range qrw.columns {
-			if i > 0 {
-				_, err = qrw.w.Write([]byte(`,`))
-				if err != nil {
-					qrw.err = err
-					return err
-				}
-			}
-			_, err = qrw.w.Write(strconv.AppendQuote(nil, c))
-			if err != nil {
-				qrw.err = err
-				return err
-			}
-		}
+	rsw.columns = columns
 
-		_, err = qrw.w.Write([]byte(`],"values":[`))
-		if err != nil {
-			qrw.err = err
-			return err
+	rsw.buf.WriteString(`{"columns":[`)
+	for i, c := range columns {
+		if i > 0 {
+			rsw.buf.WriteByte(',')
 		}
+		rsw.buf.Write(strconv.AppendQuote(nil, c))
+	}
+	rsw.buf.WriteByte(']')
+}
+
+func writeValue(w io.Writer, v any) error {
+	var err error
+	switch t := v.(type) {
+	case nil:
+		_, err = w.Write([]byte(`null`))
+	case int8:
+		_, err = w.Write([]byte(strconv.FormatInt(int64(t), 10)))
+	case int16:
+		_, err = w.Write([]byte(strconv.FormatInt(int64(t), 10)))
+	case int32:
+		_, err = w.Write([]byte(strconv.FormatInt(int64(t), 10)))
+	case int64:
+		_, err = w.Write([]byte(strconv.FormatInt(t, 10)))
+	case int:
+		_, err = w.Write([]byte(strconv.FormatInt(int64(t), 10)))
+	case uint8:
+		_, err = w.Write([]byte(strconv.FormatUint(uint64(t), 10)))
+	case uint16:
+		_, err = w.Write([]byte(strconv.FormatUint(uint64(t), 10)))
+	case uint32:
+		_, err = w.Write([]byte(strconv.FormatUint(uint64(t), 10)))
+	case uint64:
+		_, err = w.Write([]byte(strconv.FormatUint(t, 10)))
+	case uint:
+		_, err = w.Write([]byte(strconv.FormatUint(uint64(t), 10)))
+	case float32:
+		_, err = w.Write([]byte(strconv.FormatFloat(float64(t), 'g', -1, 32)))
+	case float64:
+		_, err = w.Write([]byte(strconv.FormatFloat(t, 'g', -1, 64)))
+	case string:
+		_, err = w.Write(strconv.AppendQuote(nil, t))
+	case time.Time:
+		_, err = w.Write([]byte(strconv.FormatInt(t.UnixNano(), 10)))
+	case time.Duration:
+		_, err = w.Write([]byte(strconv.FormatInt(t.Nanoseconds(), 10)))
+	case bool:
+		_, err = w.Write([]byte(strconv.FormatBool(t)))
+	default:
+		panic("unexpected")
+	}
+	return err
+}
+
+func (rsw *resultSetWriter) AddRow(vals ...any) error {
+	if rsw.err != nil {
+		return rsw.err
+	}
+
+	if rsw.columns == nil {
+		panic("columns must be set before add rows.")
+	}
+
+	if len(vals) != len(rsw.columns) {
+		panic("column count mismatch.")
+	}
+
+	var err error
+	defer func() {
+		if err != nil {
+			rsw.SetError(err)
+		}
+	}()
+
+	if rsw.numRow == 0 {
+		_, err = rsw.buf.WriteString(`,"values":[[`)
+	} else {
+		_, err = rsw.buf.WriteString(`,[`)
+	}
+	if err != nil {
+		return err
 	}
 
 	for i, v := range vals {
-		var err error
 		if i > 0 {
-			_, err = qrw.w.Write([]byte(`,`))
-		} else if qrw.numRow > 0 {
-			_, err = qrw.w.Write([]byte(`,[`))
-		} else {
-			_, err = qrw.w.Write([]byte(`[`))
+			if err = rsw.buf.WriteByte(','); err != nil {
+				return err
+			}
 		}
-		if err != nil {
-			qrw.err = err
+		if err = writeValue(&rsw.buf, v); err != nil {
 			return err
-		}
-
-		switch v.Type {
-		case ast.FieldValueTypeNil:
-			qrw.w.Write([]byte(`null`))
-		case ast.FieldValueTypeTime:
-			qrw.w.Write([]byte(strconv.FormatInt(v.Time.UnixNano(), 10)))
-		case ast.FieldValueTypeDuration:
-			qrw.w.Write([]byte(strconv.FormatInt(int64(v.Duration), 10)))
-		case ast.FieldValueTypeBool:
-			qrw.w.Write([]byte(strconv.FormatBool(v.Bool)))
-		case ast.FieldValueTypeInt:
-			qrw.w.Write([]byte(strconv.FormatInt(v.Int, 10)))
-		case ast.FieldValueTypeFloat:
-			qrw.w.Write([]byte(strconv.FormatFloat(v.Float, 'g', -1, 64)))
-		case ast.FieldValueTypeString:
-			qrw.w.Write(strconv.AppendQuote(nil, v.String))
-		default:
-			panic("unexpected")
 		}
 	}
 
-	if _, err := qrw.w.Write([]byte(`]`)); err != nil {
-		qrw.err = err
+	if err = rsw.buf.WriteByte(']'); err != nil {
 		return err
 	}
 
-	qrw.numRow++
+	rsw.numRow++
 	return nil
 }
 
-func (qrw *queryResultWriter) Flush() error {
-	if err := qrw.err; err != nil {
-		if se, ok := qrw.err.(*xerrors.StatusError); ok {
-			http.Error(qrw.w, se.Msg, se.StatusCode)
-		} else {
-			http.Error(qrw.w, err.Error(), http.StatusInternalServerError)
-		}
-		return err
+func (rsw *resultSetWriter) Flush(w http.ResponseWriter) error {
+	if rsw.err != nil {
+		return rsw.err
 	}
 
-	if qrw.numRow == 0 {
-		qrw.w.WriteHeader(http.StatusNoContent)
+	if rsw.columns == nil {
+		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}
 
-	if _, err := qrw.w.Write([]byte(`]}`)); err != nil {
-		qrw.err = err
-		if se, ok := qrw.err.(*xerrors.StatusError); ok {
-			http.Error(qrw.w, se.Msg, se.StatusCode)
-		} else {
-			http.Error(qrw.w, err.Error(), http.StatusInternalServerError)
-		}
+	var err error
+	if rsw.numRow > 0 {
+		_, err = rsw.buf.WriteString(`]}`)
+	} else {
+		err = rsw.buf.WriteByte('}')
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return err
 	}
 
-	return nil
+	// we can do nothing to this error because data may already been written
+	// to [w]
+	_, err = w.Write(rsw.buf.Bytes())
+	return err
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
@@ -159,14 +202,19 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	qrw := &queryResultWriter{w: w}
-	if err = stmt.Execute(qrw); err == nil {
-		err = qrw.Flush()
+	rsw := &resultSetWriter{}
+	if err := stmt.Execute(rsw); err != nil {
+		if se, ok := err.(*xerrors.StatusError); ok {
+			http.Error(w, se.Msg, se.StatusCode)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
 	}
 
-	if err != nil {
+	if err := rsw.Flush(w); err != nil {
 		slog.Error(
-			"failed to execute query",
+			"failed to flush result set",
 			slog.String("query", q),
 			slog.String("error", err.Error()),
 		)
