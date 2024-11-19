@@ -21,11 +21,14 @@ const (
 	opUpdateNodeList = "update-node-list"
 )
 
-// registerNodeHandlers registers handlers for node operations.
-func registerNodeHandlers() {
-	registerDataApplyFunc(opUpdateNodeList, applyUpdateNodeList)
+// nodeRegisterRaftApplyFuncs registers raft apply functions for node operations.
+func nodeRegisterRaftApplyFuncs() {
+	registerRaftApplyFunc(opUpdateNodeList, applyUpdateNodeList)
+}
 
-	// only voters need to register HTTP handlers.
+// nodeRegisterAPIHandlers registers API handlers for node operations.
+func nodeRegisterAPIHandlers() {
+	// only voters need to register API handlers.
 	if !config.CurrentNode().Meta.RaftVoter {
 		return
 	}

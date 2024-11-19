@@ -27,12 +27,15 @@ const (
 	opDropDatabase   = "drop-database"
 )
 
-// registerDatabaseHandlers registers handlers for database operations.
-func registerDatabaseHandlers() {
-	registerDataApplyFunc(opCreateDatabase, applyCreateDatabase)
-	registerDataApplyFunc(opDropDatabase, applyDropDatabase)
+// databaseRegisterRaftApplyFuncs registers raft apply functions for database operations.
+func databaseRegisterRaftApplyFuncs() {
+	registerRaftApplyFunc(opCreateDatabase, applyCreateDatabase)
+	registerRaftApplyFunc(opDropDatabase, applyDropDatabase)
+}
 
-	// only voters need to register HTTP handlers.
+// databaseRegisterAPIHandlers registers API handlers for database operations.
+func databaseRegisterAPIHandlers() {
+	// only voters need to register API handlers.
 	if !config.CurrentNode().Meta.RaftVoter {
 		return
 	}

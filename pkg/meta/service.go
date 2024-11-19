@@ -191,6 +191,11 @@ var svcInst *service
 
 // StartService starts the meta service.
 func StartService() error {
+	// raft apply functions must be registered before raft is created.
+	nodeRegisterRaftApplyFuncs()
+	userRegisterRaftApplyFuncs()
+	databaseRegisterRaftApplyFuncs()
+
 	inst := newService()
 
 	hasState, err := inst.start()
@@ -203,9 +208,10 @@ func StartService() error {
 		svcInst.joinOrBootstrap()
 	}
 
-	registerNodeHandlers()
-	registerUserHandlers()
-	registerDatabaseHandlers()
+	// API handlers must be registered after raft is created.
+	nodeRegisterAPIHandlers()
+	userRegisterAPIHandlers()
+	databaseRegisterAPIHandlers()
 
 	svcInst.updateNodeInfo()
 	return nil

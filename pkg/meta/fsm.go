@@ -89,8 +89,8 @@ func (d *Data) Persist(sink raft.SnapshotSink) error {
 func (d *Data) Release() {
 }
 
-// dataApplyFuncs is the list of functions to apply data operations. Most of
-// the operations (but not all) includes 4 functions:
+// raftApplyFuncs is the list of functions to apply raft logs. Most of the data
+// operations (but not all) includes 4 functions:
 //
 //   - applyXXXXXX : applies the raft log of the operation to the current node,
 //     it is called by raft and are listed in this map.
@@ -104,14 +104,14 @@ func (d *Data) Release() {
 //   - XXXXXX      : exported function for client to call, it builds and sends
 //     an HTTP request to the leader if called from a follower, and call
 //     leaderXXXXXX directly if called from the leader.
-var dataApplyFuncs = map[string]func(*raft.Log) any{}
+var raftApplyFuncs = map[string]func(*raft.Log) any{}
 
-// registerDataApplyFunc registers a data apply function.
-func registerDataApplyFunc(op string, fn func(*raft.Log) any) {
-	if dataApplyFuncs[op] != nil {
-		panic("duplicate data apply function: " + op)
+// registerRaftApplyFunc registers a raft apply function.
+func registerRaftApplyFunc(op string, fn func(*raft.Log) any) {
+	if raftApplyFuncs[op] != nil {
+		panic("duplicate raft apply function: " + op)
 	}
-	dataApplyFuncs[op] = fn
+	raftApplyFuncs[op] = fn
 }
 
 // baseCommand is the base of all data operation commands.
@@ -148,15 +148,15 @@ func (s *service) Apply(l *raft.Log) any {
 	var cmd baseCommand
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
 		slog.Error(
-			"failed to unmarshal data operation command",
+			"failed to unmarshal raft log to data operation command",
 			slog.String("error", err.Error()),
 		)
 		return err
 	}
 
-	fn := dataApplyFuncs[cmd.Op]
+	fn := raftApplyFuncs[cmd.Op]
 	if fn == nil {
-		panic("unknown data operation: " + cmd.Op)
+		panic("unknown operation: " + cmd.Op)
 	}
 
 	return fn(l)

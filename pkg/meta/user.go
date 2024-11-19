@@ -37,13 +37,16 @@ const (
 	opSetPassword = "set-password"
 )
 
-// registerUserHandlers registers handlers for user operations.
-func registerUserHandlers() {
-	registerDataApplyFunc(opCreateUser, applyCreateUser)
-	registerDataApplyFunc(opDropUser, applyDropUser)
-	registerDataApplyFunc(opSetPassword, applySetPassword)
+// userRegisterRaftApplyFuncs registers raft apply functions for user operations.
+func userRegisterRaftApplyFuncs() {
+	registerRaftApplyFunc(opCreateUser, applyCreateUser)
+	registerRaftApplyFunc(opDropUser, applyDropUser)
+	registerRaftApplyFunc(opSetPassword, applySetPassword)
+}
 
-	// only voters need to register HTTP handlers.
+// userRegisterAPIHandlers registers API handlers for user operations.
+func userRegisterAPIHandlers() {
+	// only voters need to register API handlers.
 	if !config.CurrentNode().Meta.RaftVoter {
 		return
 	}
