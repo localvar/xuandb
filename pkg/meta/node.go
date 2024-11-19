@@ -21,8 +21,8 @@ const (
 	opUpdateNodeList = "update-node-list"
 )
 
-// nodeRegisterRaftApplyFuncs registers raft apply functions for node operations.
-func nodeRegisterRaftApplyFuncs() {
+func nodeInit() {
+	// registers raft apply functions for node operations.
 	registerRaftApplyFunc(opUpdateNodeList, applyUpdateNodeList)
 }
 

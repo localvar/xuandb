@@ -191,10 +191,9 @@ var svcInst *service
 
 // StartService starts the meta service.
 func StartService() error {
-	// raft apply functions must be registered before raft is created.
-	nodeRegisterRaftApplyFuncs()
-	userRegisterRaftApplyFuncs()
-	databaseRegisterRaftApplyFuncs()
+	nodeInit()
+	userInit()
+	dbInit()
 
 	inst := newService()
 
@@ -223,4 +222,5 @@ func ShutdownService() {
 		svcInst.shutdown()
 		svcInst = nil
 	}
+	dbUninit()
 }

@@ -37,8 +37,8 @@ const (
 	opSetPassword = "set-password"
 )
 
-// userRegisterRaftApplyFuncs registers raft apply functions for user operations.
-func userRegisterRaftApplyFuncs() {
+func userInit() {
+	// registers raft apply functions for user operations.
 	registerRaftApplyFunc(opCreateUser, applyCreateUser)
 	registerRaftApplyFunc(opDropUser, applyDropUser)
 	registerRaftApplyFunc(opSetPassword, applySetPassword)

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -27,10 +28,62 @@ const (
 	opDropDatabase   = "drop-database"
 )
 
-// databaseRegisterRaftApplyFuncs registers raft apply functions for database operations.
-func databaseRegisterRaftApplyFuncs() {
+type dbInformer struct {
+	wg             sync.WaitGroup
+	ch             chan any
+	createHandlers []func(*Database)
+	dropHandlers   []func(string)
+}
+
+func (di *dbInformer) AddCreateHandler(handler func(*Database)) {
+	di.createHandlers = append(di.createHandlers, handler)
+}
+
+func (di *dbInformer) AddDropHandler(handler func(string)) {
+	di.dropHandlers = append(di.dropHandlers, handler)
+}
+
+func (di *dbInformer) inform(evt any) {
+	di.ch <- evt
+}
+
+func (di *dbInformer) run() {
+	di.wg.Add(1)
+	go func() {
+		defer di.wg.Done()
+		for evt := range di.ch {
+			switch cmd := evt.(type) {
+			case *createDatabaseCommand:
+				for _, handler := range di.createHandlers {
+					handler(cmd.Database)
+				}
+
+			case *dropDatabaseCommand:
+				for _, handler := range di.dropHandlers {
+					handler(cmd.Name)
+				}
+
+			default:
+				panic("unknown database event")
+			}
+		}
+	}()
+}
+
+func (di *dbInformer) close() {
+	close(di.ch)
+	di.wg.Wait()
+}
+
+var databaseInformer *dbInformer
+
+func dbInit() {
+	// registers raft apply functions for database operations.
 	registerRaftApplyFunc(opCreateDatabase, applyCreateDatabase)
 	registerRaftApplyFunc(opDropDatabase, applyDropDatabase)
+
+	databaseInformer = &dbInformer{ch: make(chan any, 10)}
+	databaseInformer.run()
 }
 
 // databaseRegisterAPIHandlers registers API handlers for database operations.
@@ -41,6 +94,10 @@ func databaseRegisterAPIHandlers() {
 	}
 	httpserver.HandleFunc("POST /meta/databases", handleCreateDatabase)
 	httpserver.HandleFunc("DELETE /meta/databases", handleDropDatabase)
+}
+
+func dbUninit() {
+	databaseInformer.close()
 }
 
 // Database represents a database.
@@ -73,6 +130,7 @@ func applyCreateDatabase(log *raft.Log) any {
 		return nil
 	}
 
+	databaseInformer.inform(cmd)
 	return ErrDatabaseExists
 }
 
@@ -145,6 +203,7 @@ func applyDropDatabase(log *raft.Log) any {
 	delete(md.Databases, key)
 	md.unlock()
 
+	databaseInformer.inform(cmd)
 	return nil
 }
 
