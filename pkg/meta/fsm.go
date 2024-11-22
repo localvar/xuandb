@@ -104,14 +104,15 @@ func (d *Data) Release() {
 //   - XXXXXX      : exported function for client to call, it builds and sends
 //     an HTTP request to the leader if called from a follower, and call
 //     leaderXXXXXX directly if called from the leader.
-var raftApplyFuncs = map[string]func(*raft.Log) any{}
+var raftApplyFuncs = map[string]func(*raft.Log) any{
+	opUpdateNodeList: applyUpdateNodeList,
 
-// registerRaftApplyFunc registers a raft apply function.
-func registerRaftApplyFunc(op string, fn func(*raft.Log) any) {
-	if raftApplyFuncs[op] != nil {
-		panic("duplicate raft apply function: " + op)
-	}
-	raftApplyFuncs[op] = fn
+	opCreateDatabase: applyCreateDatabase,
+	opDropDatabase:   applyDropDatabase,
+
+	opCreateUser:  applyCreateUser,
+	opDropUser:    applyDropUser,
+	opSetPassword: applySetPassword,
 }
 
 // baseCommand is the base of all data operation commands.

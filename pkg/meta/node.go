@@ -21,11 +21,6 @@ const (
 	opUpdateNodeList = "update-node-list"
 )
 
-func nodeInit() {
-	// registers raft apply functions for node operations.
-	registerRaftApplyFunc(opUpdateNodeList, applyUpdateNodeList)
-}
-
 // nodeRegisterAPIHandlers registers API handlers for node operations.
 func nodeRegisterAPIHandlers() {
 	// only voters need to register API handlers.

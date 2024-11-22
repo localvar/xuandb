@@ -78,10 +78,6 @@ func (di *dbInformer) close() {
 var databaseInformer *dbInformer
 
 func dbInit() {
-	// registers raft apply functions for database operations.
-	registerRaftApplyFunc(opCreateDatabase, applyCreateDatabase)
-	registerRaftApplyFunc(opDropDatabase, applyDropDatabase)
-
 	databaseInformer = &dbInformer{ch: make(chan any, 10)}
 	databaseInformer.run()
 }
@@ -278,4 +274,9 @@ func DatabaseByName(name string) *Database {
 	md.lock()
 	defer md.unlock()
 	return md.Databases[key]
+}
+
+// DatabaseInformer returns the database informer.
+func DatabaseInformer() *dbInformer {
+	return databaseInformer
 }

@@ -186,13 +186,11 @@ func (s *service) shutdown() {
 	slog.Info("meta service stopped")
 }
 
-// serInst is the singleton of the meta service.
+// svcInst is the singleton of the meta service.
 var svcInst *service
 
 // StartService starts the meta service.
 func StartService() error {
-	nodeInit()
-	userInit()
 	dbInit()
 
 	inst := newService()

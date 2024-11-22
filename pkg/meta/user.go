@@ -37,13 +37,6 @@ const (
 	opSetPassword = "set-password"
 )
 
-func userInit() {
-	// registers raft apply functions for user operations.
-	registerRaftApplyFunc(opCreateUser, applyCreateUser)
-	registerRaftApplyFunc(opDropUser, applyDropUser)
-	registerRaftApplyFunc(opSetPassword, applySetPassword)
-}
-
 // userRegisterAPIHandlers registers API handlers for user operations.
 func userRegisterAPIHandlers() {
 	// only voters need to register API handlers.

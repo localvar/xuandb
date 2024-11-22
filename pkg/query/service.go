@@ -224,6 +224,7 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 // StartService starts the query service.
 func StartService() error {
 	httpserver.HandleFunc("/query", queryHandler)
+	slog.Info("query service started")
 	return nil
 }
 
